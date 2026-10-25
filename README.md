@@ -1,12 +1,20 @@
-# OpenPak PS3 Patcher
+# PS3 Patcher
 
-The client side of OpenPak for the **PlayStation 3**: what a player runs on their console to point it at
-OpenPak's network instead of the original one, and back.
+OpenPak's PS3 Patcher.
 
-**Not available yet.** PlayStation 3 support is in development; this repository is a placeholder for the
-patcher. Track progress on [openpak.org/features](https://openpak.org/features) and in the
-[docs](https://docs.openpak.org).
+| | |
+| --- | --- |
+| Console | PlayStation 3 |
+| Kind | Client (patcher) |
+| Licence | AGPL-3.0-only, see [LICENSE](LICENSE) |
 
-OpenPak never ships games, firmware, keys or console data. Use your own console and your own games.
+## Docs
 
-Licensed under the GNU Affero General Public License v3.0 only (see [LICENSE](LICENSE)).
+- [Protocol](docs/protocol.md)
+- [Evidence](docs/evidence.md)
+- [Deploy](docs/deploy.md)
+- [Notes](docs/notes.md)
+
+## Licence
+
+See [LICENSE](LICENSE).
