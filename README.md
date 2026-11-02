@@ -12,7 +12,6 @@ OpenPak's PS3 Patcher.
 
 - [Protocol](docs/protocol.md)
 - [Deploy](docs/deploy.md)
-- [Notes](docs/notes.md)
 
 ## Licence
 
