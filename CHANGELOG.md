@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.1
+
+- Fix the release build: the previous workflow referenced a non-existent container image. It now
+  runs `make stage` on the runner and compiles the plugin in `docker.io/hldtux/ps3dev:latest`
+  (a maintained PSL1GHT/ps3toolchain image), publishing `openpak_ca.sprx` plus the CA files and
+  install notes as the release asset.
+- `plugin/module.S`: real PS3 PRX export table (module_start / module_stop / module_info by NID),
+  modelled byte-for-byte on a firmware VSH plugin, so the toolchain produces a valid fake-signed
+  sprx. `plugin/Makefile` updated to the verified build (lv2.ld + lv2-sprx.o, sprxlinker, fself).
+  Build confirmed locally; loading on real hardware remains unverified.
+
 ## v0.1.0
 
 First real patcher (was a placeholder).

@@ -68,4 +68,8 @@ CA-naming decision in the research doc.
 The pokes are applied at runtime by a VSH plugin, not by modifying `vsh.self` on disk: nothing on
 `dev_flash` changes except the two `.cer` files, so rollback is removing the plugin line and
 restoring the `.orig` certs. `openpak_ca_patch.h` (generated) carries the poke values and the
-verify-before-patch originals; `openpak_ca.c` applies them.
+verify-before-patch originals; `openpak_ca.c` applies them in `module_start`. `module.S` carries
+the PRX export table — module_start (NID `0xBC9A0086`), module_stop (`0xAB779874`) and module_info
+(`0xD7F43016`), no imported libraries — modelled byte-for-byte on a real firmware VSH plugin, so
+`sprxlinker` + `fself` produce the sprx Cobra loads. The plugin build is verified to produce a
+well-formed SCE fake-self; loading and running it on real hardware is not yet verified.

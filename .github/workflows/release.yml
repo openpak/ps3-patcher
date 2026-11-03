@@ -4,6 +4,9 @@ name: release
 # nothing (OpenPak repos build on tags only). The staged CA files are produced at install time by
 # tools/stage.sh (they are just the public CA, pin-checked), so the release asset is the sprx plus
 # the staging tooling.
+#
+# `make stage` (curl/openssl/python3) runs on the Ubuntu runner; the PRX compile runs inside the
+# PSL1GHT/ps3toolchain image, invoked only for that step so the image needs no extra packages.
 on:
   push:
     tags: ['v*.*.*']
@@ -12,23 +15,32 @@ on:
 permissions:
   contents: write
 
+env:
+  PS3DEV_IMAGE: docker.io/hldtux/ps3dev:latest
+
 jobs:
   build:
     runs-on: ubuntu-24.04
-    container: ghcr.io/ps3dev/ps3dev:latest   # PSL1GHT + ppu toolchain, PS3DEV preset
     steps:
       - uses: actions/checkout@v5
-      - name: stage (generate the poke header from the pinned CA)
+
+      - name: stage (fetch the pinned CA, generate the poke header)
         run: make stage
-      - name: build the VSH plugin
-        run: make plugin
+
+      - name: build the VSH plugin (PSL1GHT container)
+        run: |
+          docker run --rm -v "$PWD":/w -w /w "$PS3DEV_IMAGE" \
+            sh -c 'make -C plugin'
+
       - name: bundle
         run: |
-          mkdir -p out
+          mkdir -p out/dev_flash/data/cert
           cp plugin/openpak_ca.sprx out/
+          cp dist/dev_flash/data/cert/CA01.cer dist/dev_flash/data/cert/CA59.cer out/dev_flash/data/cert/
           cp dist/poke-table.txt out/
           cp docs/deploy.md out/INSTALL.md
           (cd out && zip -r ../ps3-patcher-${GITHUB_REF_NAME}.zip .)
+
       - uses: softprops/action-gh-release@v2
         with:
           files: ps3-patcher-*.zip

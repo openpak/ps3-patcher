@@ -19,36 +19,38 @@
  * not take and sign-in fails cleanly. Re-derive the addresses (console-setup.md) before forcing
  * it on another version.
  *
- * Build with PSL1GHT (see Makefile). No binary is committed; CI or a local PSL1GHT builds it.
+ * No imports: it touches only its own address space (the vsh process) with direct stores and an
+ * icache flush, so the module needs no lib.stub. The PRX module export table (module_start /
+ * module_stop / module_info) is in module.S. Build with PSL1GHT (see Makefile); no binary is
+ * committed. Loading as a VSH plugin is UNVERIFIED on real hardware (proven on Pier only).
  */
-
-#include <ppu-types.h>
-#include <sys/prx.h>
 
 #include "openpak_ca_patch.h"
 
-SYS_MODULE_INFO(OPENPAK_CA, 0, 1, 0);
+#define SYS_PRX_RESIDENT 0
+#define SYS_PRX_STOP_OK  0
+
+typedef unsigned int u32;
+typedef unsigned long long u64;
 
 /* vsh text is mapped executable+writable in the vsh process under Cobra, so a direct store
  * reaches it; we still flush the instruction cache for the lines we touch. */
-static void write_u32(unsigned int addr, unsigned int val)
+static void write_u32(u32 addr, u32 val)
 {
-	*(volatile unsigned int *)(uint64_t)addr = val;
-	__asm__ volatile("dcbst 0,%0; sync; icbi 0,%0; isync" : : "r"((uint64_t)addr) : "memory");
+	*(volatile u32 *)(u64)addr = val;
+	__asm__ volatile("dcbst 0,%0; sync; icbi 0,%0; isync" : : "r"((u64)addr) : "memory");
 }
 
-static unsigned int read_u32(unsigned int addr)
+static u32 read_u32(u32 addr)
 {
-	return *(volatile unsigned int *)(uint64_t)addr;
+	return *(volatile u32 *)(u64)addr;
 }
 
-/* Patch only if the target still holds the expected original word. Returns 1 if applied. */
-static int poke_verified(unsigned int addr, unsigned int val, unsigned int orig)
+/* Patch only if the target still holds the expected original word. */
+static void poke_verified(u32 addr, u32 val, u32 orig)
 {
-	if (read_u32(addr) != orig)
-		return 0;
-	write_u32(addr, val);
-	return 1;
+	if (read_u32(addr) == orig)
+		write_u32(addr, val);
 }
 
 static void apply_pokes(void)
@@ -69,21 +71,17 @@ static void apply_pokes(void)
 #endif
 }
 
-int openpak_ca_start(uint64_t ppu_thr_id);
-int openpak_ca_stop(void);
-
-SYS_MODULE_START(openpak_ca_start);
-SYS_MODULE_STOP(openpak_ca_stop);
-
-int openpak_ca_start(uint64_t ppu_thr_id)
+/* PRX module entry points, exported by NID from module.S. */
+int module_start(u64 args, const void *argp)
 {
-	(void)ppu_thr_id;
+	(void)args;
+	(void)argp;
 	apply_pokes();
 	/* Stay resident so the pokes remain for the life of the vsh process. */
 	return SYS_PRX_RESIDENT;
 }
 
-int openpak_ca_stop(void)
+int module_stop(void)
 {
 	return SYS_PRX_STOP_OK;
 }
