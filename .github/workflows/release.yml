@@ -1,0 +1,35 @@
+name: release
+
+# A vX.Y.Z tag builds the VSH plugin and publishes the install bundle; pushes to main build
+# nothing (OpenPak repos build on tags only). The staged CA files are produced at install time by
+# tools/stage.sh (they are just the public CA, pin-checked), so the release asset is the sprx plus
+# the staging tooling.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: ghcr.io/ps3dev/ps3dev:latest   # PSL1GHT + ppu toolchain, PS3DEV preset
+    steps:
+      - uses: actions/checkout@v5
+      - name: stage (generate the poke header from the pinned CA)
+        run: make stage
+      - name: build the VSH plugin
+        run: make plugin
+      - name: bundle
+        run: |
+          mkdir -p out
+          cp plugin/openpak_ca.sprx out/
+          cp dist/poke-table.txt out/
+          cp docs/deploy.md out/INSTALL.md
+          (cd out && zip -r ../ps3-patcher-${GITHUB_REF_NAME}.zip .)
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ps3-patcher-*.zip
+          fail_on_unmatched_files: true

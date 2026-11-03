@@ -1,2 +1,7 @@
 next-session.md
 NEXT-SESSION.md
+dist/
+plugin/openpak_ca_patch.h
+plugin/*.elf
+plugin/*.prx
+plugin/*.sprx
