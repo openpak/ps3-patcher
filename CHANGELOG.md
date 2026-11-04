@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.5
+
+- Clean restart: the restart prompt now unmounts dev_blind, removes the `turnoff` marker and calls
+  sys_sm_shutdown with op 0x0200, as webMAN MOD's restart paths do. v0.2.4 used op 0x8201 and left
+  the marker, so the next boot ran the HDD check. The log is synced before the restart.
+- The manual DNS screen is kept and marked as temporary.
+
 ## v0.2.4
 
 - Cobra detection now matches webMAN MOD's `is_cobra_based()`: the version comes back through a

@@ -217,7 +217,7 @@ int main(int argc, char **argv)
 				    "Internet Connection Settings > Custom, then restart.");
 			if (ask(true, "Restart the console now?")) { op_reboot(); sleep(10); }
 		} else {
-			ask(false, "OpenPak selected.\n\nSet the console DNS: Settings > Network Settings > "
+			ask(false, "OpenPak selected.\n\nTemporary step (automatic redirection is coming): set the console DNS: Settings > Network Settings > "
 				    "Internet Connection Settings > Custom. At DNS choose Manual, Primary DNS "
 				    OPENPAK_DNS ", Secondary the same.\n\nThen restart, and sign in under "
 				    "PlayStation Network with your OpenPak email and password.");

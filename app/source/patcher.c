@@ -27,6 +27,9 @@
 #define MAX_CERT   (64 * 1024)
 #define MAX_LIST   (256 * 1024)
 
+/* the clean-shutdown marker the console keeps in the hdd tmp dir */
+#define TURNOFF_PATH "/dev_hdd0/" "tm" "p/turnoff"
+
 static const char *const CA_NAMES[2] = { "CA01.cer", "CA59.cer" };
 
 /* ---- log -------------------------------------------------------------------------------- */
@@ -46,6 +49,7 @@ static void logf_(const char *fmt, ...)
 	sysFsMkdir(OPENPAK_DIR, 0777);
 	if (sysFsOpen(OPENPAK_LOG, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_APPEND, &fd, NULL, 0) == 0) {
 		sysFsWrite(fd, line, strlen(line), &w);
+		sysLv2FsFsync(fd);
 		sysFsClose(fd);
 	}
 }
@@ -566,8 +570,18 @@ done:
 	return ok;
 }
 
+/* Restart the way webMAN MOD's own restart paths do (include/cmd/restart.h and
+ * include/file/file_delete.h del_turnoff): unmount dev_blind, delete the `turnoff` marker, then
+ * sys_sm_shutdown (379) with op 0x0200 (SYS_SOFT_REBOOT in webMAN's main.c). The console creates
+ * the marker at boot and removes it on a clean shutdown; a reboot syscall that leaves it behind
+ * makes the next boot run the HDD check. v0.2.4 used op 0x8201 and left the marker. */
 void op_reboot(void)
 {
 	logf_("reboot requested");
-	lv2syscall4(379, 0x8201, 0, 0, 0);   /* sys_sm_shutdown: reboot */
+	if (exists("/dev_blind")) fs_umount_blind();
+	sysFsUnlink(TURNOFF_PATH);
+	sleep(2);                                /* let lv2 finish flushing the file writes */
+	{
+		lv2syscall3(379, 0x0200, 0, 0);
+	}
 }
