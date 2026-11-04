@@ -17,7 +17,11 @@ typedef struct {
 	char fw[16];          /* "4.93" */
 	bool fw_known;        /* version.txt was readable */
 	bool fw_ok;           /* 4.93 CEX */
-	bool cobra;           /* CFW/HEN (Cobra syscall 8) answers */
+	bool peek;            /* lv2 peek (syscall 6) answers: CFW or HEN */
+	bool cobra;           /* Cobra syscall 8 opcode 0x7000 answers: Cobra active */
+	bool stage2;          /* /dev_flash/sys/stage2.bin present (Evilnat's Cobra) */
+	bool hen;             /* PS3HEN marker present */
+	unsigned long long peek_raw, cobra_raw;
 	bool ca_openpak;      /* both CA files in dev_flash equal the bundled OpenPak CA */
 	bool plugin_listed;   /* our line is in boot_plugins.txt */
 	bool plugin_file;     /* sprx present in /dev_hdd0/plugins */

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.2
+
+- Fix the false "no custom firmware" refusal. Detection now uses independent signals, all shown on
+  the status screen and logged raw to `patcher.log`: lv2 peek (syscall 6), Cobra (syscall 8 opcode
+  0x7000, any non-error answer), `stage2.bin`, and the HEN marker. The patcher proceeds only when
+  peek works AND Cobra is active; CFW with Cobra off gets the Toggle Cobra steps.
+- Fix the flicker: the old loop redrew the whole framebuffer on every frame and never waited for
+  the flip, so the dialog alternated with a half-drawn background. The background is now drawn once
+  into both buffers and each frame is a vsynced double-buffered flip.
+- Fix the blank screen after OK on a refusal: main returned with RSX still initialised. Every path
+  now ends on a visible dialog and leaves through `sysProcessExit`. A refused state offers no
+  install choice, only the reason.
+
 ## v0.2.1
 
 - XMB icon fills the full 320x176 frame (logo plus "OpenPak / PS3 Patcher"); it was a square tile between

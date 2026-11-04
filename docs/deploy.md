@@ -21,7 +21,7 @@ back and only then renames; it still helps to have a flash backup.**
 
 ## 2. Switch to OpenPak
 
-Start the app. It shows Network, Firmware, Custom firmware, Plugin and OpenPak CA. Choose **Yes**
+Start the app. It shows Network, Firmware, lv2 peek, Cobra, HEN, Plugin and OpenPak CA. Choose **Yes**
 at "Switch to OpenPak?". It then:
 
 1. backs up `/dev_flash/data/cert/CA01.cer` and `CA59.cer` to `/dev_hdd0/openpak/backup/` (once; an
@@ -69,6 +69,11 @@ Needs webMAN MOD or similar FTP with `dev_flash` writable.
 4. Rollback: remove the line, restore the `.orig` files, DNS to Automatic.
 
 ## Notes
+
+- Detection signals (raw values in `patcher.log`): lv2 peek = syscall 6; Cobra = syscall 8 opcode 0x7000;
+  `stage2.bin`; PS3HEN marker `/dev_hdd0/hen`. Evilnat's "Toggle Cobra" option (xai_plugin, Cobra
+  Tools; reboot required) is documented at github.com/Evilnat/xai_plugin and the Evilnat release
+  threads on psx-place.com. The exact XMB location on 4.93 is not verified here.
 
 - The OpenPak ps3 TLS terminator in front of `np-account` must offer RSA key-exchange suites and
   TLS 1.0-1.2 (the 4.93 stack offers no ECDHE) -- server side, see

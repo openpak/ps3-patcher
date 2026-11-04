@@ -28,7 +28,7 @@ the manual FTP route: [docs/deploy.md](docs/deploy.md).
 
 ## What it does
 
-- **Status:** network (PSN or OpenPak), firmware, CFW/HEN found, plugin loaded, CA installed. It
+- **Status:** network (PSN or OpenPak), firmware, lv2 peek, Cobra (and `stage2.bin`), HEN, plugin loaded, CA installed. It patches only when lv2 peek works and Cobra is active; with Cobra off it shows how to enable it (Evilnat: Cobra Tools > Toggle Cobra). It
   refuses anything but firmware 4.93 CEX.
 - **Switch to OpenPak:** backs up the stock `CA01.cer`/`CA59.cer` once to
   `/dev_hdd0/openpak/backup/`, writes the OpenPak CA over them in `dev_flash` (temp file,

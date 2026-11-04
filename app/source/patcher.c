@@ -255,13 +255,40 @@ static void read_firmware(op_status *s)
 	free(b);
 }
 
-static bool detect_cobra(void)
+/* lv2 syscalls answer with 0x8001xxxx (sign-extended or not) on failure; ENOSYS is 0x80010003. */
+static bool is_lv2_error(u64 r)
 {
-	/* Cobra / PS3HEN answer syscall 8 opcode 0x7000 (get version) with a small positive value;
-	 * a console without a payload returns a negative lv2 error code. */
-	lv2syscall2(8, 0x7000, 0);
-	s64 r = (s64)p1;
-	return r > 0 && r < 0x1000;
+	u64 hi = r >> 32;
+	return (hi == 0 || hi == 0xffffffffULL) && ((u32)r >> 16) == 0x8001;
+}
+
+/* Independent signals; every raw result goes to the log so a run shows which one works.
+ *  peek:  syscall 6 (CFW/HEN lv2 peek) on an address inside the lv2 image;
+ *  cobra: syscall 8 opcode 0x7000 (Cobra/HEN get version) answering with anything but an error;
+ *  stage2.bin: Evilnat's Cobra payload file; hen: PS3HEN's /dev_hdd0/hen directory. */
+static void detect_cfw(op_status *s)
+{
+	u64 r;
+
+	{
+		lv2syscall1(6, 0x8000000000010000ULL);
+		r = (u64)p1;
+	}
+	s->peek_raw = r;
+	s->peek = !is_lv2_error(r);
+
+	{
+		lv2syscall2(8, 0x7000, 0);
+		r = (u64)p1;
+	}
+	s->cobra_raw = r;
+	s->cobra = !is_lv2_error(r);
+
+	s->stage2 = exists("/dev_flash/sys/stage2.bin");
+	s->hen = exists("/dev_hdd0/hen");
+	logf_("detect: peek raw=%016llx -> %d; cobra(sc8 0x7000) raw=%016llx -> %d; stage2.bin=%d; hen=%d",
+	      (unsigned long long)s->peek_raw, s->peek, (unsigned long long)s->cobra_raw, s->cobra,
+	      s->stage2, s->hen);
 }
 
 void op_status_read(op_status *s)
@@ -274,7 +301,8 @@ void op_status_read(op_status *s)
 
 	memset(s, 0, sizeof(*s));
 	read_firmware(s);
-	s->cobra = detect_cobra();
+	detect_cfw(s);
+	logf_("firmware: %s known=%d ok=%d", s->fw, s->fw_known, s->fw_ok);
 
 	snprintf(path, sizeof(path), "%s/ca/%s", OPENPAK_USRDIR, CA_NAMES[0]);
 	c1 = read_all(path, MAX_CERT, &l1);
@@ -331,9 +359,19 @@ bool op_supported(const op_status *s, char *why, int why_len)
 			 "Nothing was changed.", s->fw);
 		return false;
 	}
-	if (!s->cobra) {
+	if (!s->peek && !s->cobra) {
 		snprintf(why, why_len, "No custom firmware or HEN found. Enable HEN (or run Evilnat CFW) and "
 			 "start this app again.");
+		return false;
+	}
+	if (!s->cobra) {
+		snprintf(why, why_len, "Custom firmware found, but Cobra is not active (plugins would not "
+			 "load). On Evilnat: open its Cobra Tools menu and choose Toggle Cobra, then "
+			 "restart and run this app again.");
+		return false;
+	}
+	if (!s->peek) {
+		snprintf(why, why_len, "Cobra answers but lv2 peek does not. The patcher will not continue.");
 		return false;
 	}
 	if (!s->bundle_ok) {

@@ -13,6 +13,7 @@
 #include <sysutil/msg.h>
 #include <sysutil/video.h>
 #include <rsx/rsx.h>
+#include <lv2/process.h>
 
 #include "patcher.h"
 
@@ -43,15 +44,30 @@ static void wait_flip(void)
 	gcmResetFlipStatus();
 }
 
-static void present(void)
+static void fill_background(u32 *p)
 {
-	/* paper-dark background with a thin accent bar, then flip */
-	u32 *p = fb[cur_fb];
+	/* paper-dark background with a thin accent bar; drawn once, never per frame */
 	u32 i, n = width * height;
 	for (i = 0; i < n; i++)
 		p[i] = 0x00101418;
 	for (i = 0; i < width * 6; i++)
 		p[width * 90 + i] = 0x0022b8cf;
+}
+
+/* Double-buffered flip with vsync. Both buffers already hold the same constant background, so a
+ * flip changes nothing visible; its job is to keep the display pipeline (and the system dialog
+ * composited on top of it) running. The previous version redrew the whole buffer on every call and
+ * never waited for the flip, writing into a buffer that could still be on screen: the dialog and
+ * a half-drawn background alternated, which is the flicker. */
+static bool first_flip = true;
+
+static void present(void)
+{
+	if (first_flip)
+		gcmResetFlipStatus();
+	else
+		wait_flip();
+	first_flip = false;
 	gcmSetFlip(ctx, cur_fb);
 	rsxFlushBuffer(ctx);
 	gcmSetWaitFlip(ctx);
@@ -88,6 +104,8 @@ static bool video_init(void)
 		rsxAddressToOffset(fb[i], &off);
 		gcmSetDisplayBuffer(i, off, pitch, width, height);
 	}
+	fill_background(fb[0]);
+	fill_background(fb[1]);
 	gcmResetFlipStatus();
 	present();
 	return true;
@@ -132,26 +150,43 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 "OpenPak PS3 Patcher %s\n\n"
 		 "Network: %s\n"
 		 "Firmware: %s%s\n"
-		 "Custom firmware: %s\n"
+		 "lv2 peek: %s\n"
+		 "Cobra: %s (stage2.bin %s)\n"
+		 "HEN: %s\n"
 		 "Plugin: %s\n"
 		 "OpenPak CA: %s",
 		 OPENPAK_VERSION,
 		 on ? "OpenPak" : "PSN",
 		 s->fw_known ? s->fw : "unknown", s->fw_ok ? " CEX" : "",
-		 s->cobra ? "found (CFW or HEN)" : "not found",
+		 s->peek ? "yes" : "no",
+		 s->cobra ? "active" : "not active", s->stage2 ? "present" : "absent",
+		 s->hen ? "yes" : "no",
 		 plug,
 		 s->ca_openpak ? "installed" : "not installed");
+}
+
+/* Every path ends here: a few more flips so the last frame is clean, then a real process exit
+ * back to the XMB. Returning from main with RSX still initialised left a blank screen. */
+static void quit_clean(void)
+{
+	int i;
+	for (i = 0; i < 3; i++) {
+		sysUtilCheckCallback();
+		present();
+	}
+	sysUtilUnregisterCallback(SYSUTIL_EVENT_SLOT0);
+	sysProcessExit(0);
 }
 
 int main(int argc, char **argv)
 {
 	op_status s;
-	char text[768], why[256];
+	char text[1024], why[256];
 	bool on;
 
 	(void)argc; (void)argv;
 	sysUtilRegisterCallback(SYSUTIL_EVENT_SLOT0, sysutil_cb, NULL);
-	if (!video_init()) return 1;
+	if (!video_init()) sysProcessExit(1);
 
 	op_status_read(&s);
 	build_status(&s, text, sizeof(text));
@@ -183,6 +218,6 @@ int main(int argc, char **argv)
 		}
 	}
 out:
-	sysUtilUnregisterCallback(SYSUTIL_EVENT_SLOT0);
+	quit_clean();
 	return 0;
 }
