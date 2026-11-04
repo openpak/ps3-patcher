@@ -132,7 +132,7 @@ static bool ask(bool yesno, const char *text)
 		sysUtilCheckCallback();
 		present();
 	}
-	if (!dlg_done) msgDialogAbort();
+	if (!dlg_done) { msgDialogAbort(); msgDialogClose(500.0f); }
 	return dlg_btn == MSG_DIALOG_BTN_YES || dlg_btn == MSG_DIALOG_BTN_OK;
 }
 
@@ -165,8 +165,11 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 s->ca_openpak ? "installed" : "not installed");
 }
 
-/* Every path ends here: a few more flips so the last frame is clean, then a real process exit
- * back to the XMB. Returning from main with RSX still initialised left a blank screen. */
+/* Every path ends here, in this order: no dialog open, last flip finished, RSX command stream
+ * drained (rsxFinish blocks until the GPU reached the reference), callback unregistered, then
+ * sysProcessExit. No reboot or other lv2 call is made on a quit path. v0.2.0 instead returned from
+ * main with a flip still queued (gcmSetWaitFlip issued, never waited) and the RSX live, which is
+ * the most likely cause of the whole-console freeze reported on hardware. */
 static void quit_clean(void)
 {
 	int i;
@@ -174,6 +177,8 @@ static void quit_clean(void)
 		sysUtilCheckCallback();
 		present();
 	}
+	wait_flip();
+	rsxFinish(ctx, 1);
 	sysUtilUnregisterCallback(SYSUTIL_EVENT_SLOT0);
 	sysProcessExit(0);
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.3
+
+- Exit path rebuilt after the whole-console freeze on a refusal: v0.2.0 and v0.2.2-era code left
+  main with a flip queued and the RSX live. Now: dialog closed, last flip awaited, `rsxFinish`
+  drains the GPU, callback unregistered, `sysProcessExit(0)`. No reboot or lv2 call on quit paths.
+  (v0.2.2 had already added the vsynced frames, detection signals and the clean-exit call; its
+  teardown lacked the final flip wait and `rsxFinish`.)
+
 ## v0.2.2
 
 - Fix the false "no custom firmware" refusal. Detection now uses independent signals, all shown on
