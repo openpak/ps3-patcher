@@ -378,6 +378,24 @@ void op_status_read(op_status *s)
 		free(st);
 	}
 
+	st = read_all(OPENPAK_REDIRECT_STATUS, 1024, &len);
+	if (st) {
+		int nm, of, lv, ps, fl;
+		char state[16];
+		/* first line: state=ok names=N of=M live=L passes=P failed=F via=..; the rest is per-name counts */
+		if (sscanf((char *)st, "state=%15s names=%d of=%d live=%d passes=%d failed=%d", state, &nm, &of, &lv, &ps, &fl) == 6) {
+			s->redirect_ran = true;
+			snprintf(s->redirect_state, sizeof(s->redirect_state), "%s", state);
+			s->redirect_names = nm;
+			s->redirect_of = of;
+			s->redirect_live = lv;
+			s->redirect_passes = ps;
+			s->redirect_failed = fl;
+			logf_("redirect.status: %s", (char *)st);
+		}
+		free(st);
+	}
+
 	snprintf(path, sizeof(path), "%s/%s", OPENPAK_BACKUP_DIR, CA_NAMES[0]);
 	s->backup_ok = exists(path);
 	snprintf(path, sizeof(path), "%s/%s", OPENPAK_BACKUP_DIR, CA_NAMES[1]);
@@ -469,6 +487,7 @@ bool op_switch_openpak(char *err, int err_len)
 	if (!load_bundle(ca, cl, &sprx, &sl)) FAIL("Could not read the bundled files.");
 	ensure_dirs();
 	sysFsUnlink(OPENPAK_STATUS);
+	sysFsUnlink(OPENPAK_REDIRECT_STATUS);
 
 	/* 1. back up the stock CAs, once. Never overwrite a backup. */
 	for (i = 0; i < 2; i++) {
@@ -562,6 +581,7 @@ bool op_switch_psn(char *err, int err_len)
 	if (!boot_list_remove()) FAIL("Could not update boot_plugins.txt.");
 	sysFsUnlink(OPENPAK_PLUGIN_DST);
 	sysFsUnlink(OPENPAK_STATUS);
+	sysFsUnlink(OPENPAK_REDIRECT_STATUS);
 	ok = true;
 	logf_("switched back to PSN (backups kept)");
 done:

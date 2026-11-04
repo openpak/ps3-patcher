@@ -10,3 +10,4 @@ app/*.elf
 app/*.self
 app/*.pkg
 plugin/*.o
+plugin/openpak_names.h

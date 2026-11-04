@@ -1,0 +1,33 @@
+# OpenPak PS3 name rewrite list.
+#
+# One entry per line: <match> TAB <replace>. The plugin finds <match> in the vsh process
+# memory and overwrites it with <replace>, byte for byte, so <replace> MUST have the same
+# length as <match> (tools/stage.sh refuses anything else). Every PSN host name the firmware
+# builds ends in one of these suffixes; "playstation.net" and "playstation.org" are 15
+# characters, as is "ps3.openpak.org", so the rewrite is a pure suffix swap:
+#
+#   auth.api.np.ac.playstation.net  ->  auth.api.np.ac.ps3.openpak.org
+#
+# *.ps3.openpak.org is covered by the public wildcard DNS record and by np-account's per-SNI
+# leaf certificates, so no console DNS setting is involved.
+#
+# This is the same shape as one entry of the network's single signed redirect list (card #128):
+# a match, a replacement, nothing console-specific. Entries for other consoles never match
+# anything in a PS3, so a later list can be merged in unfiltered: tools/stage.sh appends the
+# file named by NAMES_EXTRA (same format) at build time.
+#
+# Left out on purpose: XML namespace URIs ("http://playstation.net/np/rt/..." are compared
+# against what the server sends, not connected to) and JID formats ("%s@%s.%s.%s.playstation.net").
+#
+# (no header row: the first column is the match, the second the replacement)
+.ac.playstation.net	.ac.ps3.openpak.org
+.dl.playstation.net	.dl.ps3.openpak.org
+.community.playstation.net	.community.ps3.openpak.org
+.communication.playstation.net	.communication.ps3.openpak.org
+.net.playstation.net	.net.ps3.openpak.org
+.update.playstation.net	.update.ps3.openpak.org
+.update.playstation.org	.update.ps3.openpak.org
+.dnas.playstation.org	.dnas.ps3.openpak.org
+.home.playstation.net	.home.ps3.openpak.org
+stun.playstation.net	stun.ps3.openpak.org
+trophy.playstation.net	trophy.ps3.openpak.org

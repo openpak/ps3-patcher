@@ -11,7 +11,7 @@
 #define OPENPAK_PLUGIN_DST "/dev_hdd0/plugins/openpak_ca.sprx"
 #define OPENPAK_BOOT_LIST  "/dev_hdd0/boot_plugins.txt"
 #define OPENPAK_STATUS     OPENPAK_DIR "/plugin.status"
-#define OPENPAK_DNS        "145.241.199.19"
+#define OPENPAK_REDIRECT_STATUS OPENPAK_DIR "/redirect.status"
 
 typedef struct {
 	char fw[16];          /* "4.93" */
@@ -30,6 +30,9 @@ typedef struct {
 	bool plugin_file;     /* sprx present in /dev_hdd0/plugins */
 	bool plugin_ran;      /* plugin.status written by this boot's plugin */
 	int  pokes_applied, pokes_verified, pokes_total;
+	bool redirect_ran;    /* redirect.status written by this boot's plugin */
+	char redirect_state[16];  /* ok | hen | nolv2 | nothread | restored */
+	int  redirect_names, redirect_of, redirect_live, redirect_passes, redirect_failed;
 	bool backup_ok;       /* both backups exist */
 	bool bundle_ok;       /* CA01/CA59/sprx are in USRDIR */
 } op_status;

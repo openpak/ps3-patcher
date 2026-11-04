@@ -21,7 +21,7 @@ needs to accept our certificate chain. Patch the console, never the game.
 2. XMB: **Game > Package Manager > Install Package Files > Standard**, pick the pkg.
 3. Start **OpenPak PS3 Patcher** from the Game column. It shows the status and asks
    **Switch to OpenPak?**. Choose Yes.
-4. Set the console DNS (the app shows how), restart, and sign in with your OpenPak email and password.
+4. Restart, and sign in with your OpenPak email and password. Leave the network DNS on Automatic.
 
 To go back, start the app again and choose **Switch back to PSN?**. Full steps, safety notes and
 the manual FTP route: [docs/deploy.md](docs/deploy.md).
@@ -36,7 +36,8 @@ the manual FTP route: [docs/deploy.md](docs/deploy.md).
   to `/dev_hdd0/boot_plugins.txt`, then asks to restart.
 - **Switch back to PSN:** restores the backups, removes the plugin line and file. Other plugins'
   lines are never touched.
-- **DNS** is not written by the app (see deploy.md); the app shows the exact settings.
+- **No DNS step.** The plugin rewrites the PSN host names in the running firmware to OpenPak names, so
+  the console DNS stays Automatic. The status screen shows `Redirect: N names`; see [docs/redirect.md](docs/redirect.md).
 - **VSH plugin** -- `openpak_ca.sprx` applies three pokes to the running vsh process at boot
   (verify-before-patch, so a wrong firmware no-ops instead of bricking): the per-file SHA-1 gate so
   our replaced certs load, and the NP-profile issuer-CN pin so our chain is accepted.

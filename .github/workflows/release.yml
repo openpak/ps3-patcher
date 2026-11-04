@@ -28,6 +28,11 @@ jobs:
       - name: stage (fetch the pinned CA, generate the poke header)
         run: make stage
 
+      - name: test the name rewrite (host build, fake memory)
+        run: |
+          cc -O2 -Wall -Iplugin -o "$RUNNER_TEMP/test_redirect" tools/test_redirect.c
+          "$RUNNER_TEMP/test_redirect"
+
       - name: build the VSH plugin (PSL1GHT container)
         run: |
           docker run --rm -v "$PWD":/w -w /w "$PS3DEV_IMAGE" \
@@ -44,7 +49,7 @@ jobs:
           mkdir -p out/dev_flash/data/cert
           cp plugin/openpak_ca.sprx out/
           cp dist/dev_flash/data/cert/CA01.cer dist/dev_flash/data/cert/CA59.cer out/dev_flash/data/cert/
-          cp dist/poke-table.txt out/
+          cp dist/poke-table.txt dist/redirect-names.txt out/
           cp docs/deploy.md out/INSTALL.md
           (cd out && zip -r ../ps3-patcher-${GITHUB_REF_NAME}.zip .)
 

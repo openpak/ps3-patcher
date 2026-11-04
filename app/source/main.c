@@ -146,6 +146,18 @@ static void build_status(const op_status *s, char *out, size_t n)
 	else if (s->pokes_applied == s->pokes_total) snprintf(plug, sizeof(plug), "loaded, %d/%d patches", s->pokes_applied, s->pokes_total);
 	else snprintf(plug, sizeof(plug), "loaded, only %d/%d patches", s->pokes_applied, s->pokes_total);
 
+	char redir[96];
+
+	if (!s->plugin_listed) snprintf(redir, sizeof(redir), "off");
+	else if (!s->redirect_ran) snprintf(redir, sizeof(redir), "not run yet (restart)");
+	else if (!strcmp(s->redirect_state, "ok"))
+		snprintf(redir, sizeof(redir), "%d names%s", s->redirect_names,
+			 s->redirect_failed ? " (some did not verify, see log)" : "");
+	else if (!strcmp(s->redirect_state, "hen")) snprintf(redir, sizeof(redir), "unavailable (HEN has no lv1 poke)");
+	else if (!strcmp(s->redirect_state, "nolv2")) snprintf(redir, sizeof(redir), "unavailable (lv1 memory not reachable)");
+	else if (!strcmp(s->redirect_state, "nothread")) snprintf(redir, sizeof(redir), "unavailable (thread did not start)");
+	else snprintf(redir, sizeof(redir), "%s", s->redirect_state);
+
 	snprintf(out, n,
 		 "OpenPak PS3 Patcher %s\n\n"
 		 "Network: %s\n"
@@ -155,6 +167,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 "stage2: %s\n"
 		 "HEN: %s\n"
 		 "Plugin: %s\n"
+		 "Redirect: %s\n"
 		 "OpenPak CA: %s",
 		 OPENPAK_VERSION,
 		 on ? "OpenPak" : "PSN",
@@ -164,6 +177,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 s->stage2 ? "present" : s->stage2_off ? "renamed (disabled)" : "not found",
 		 s->hen ? "yes" : "no",
 		 plug,
+		 redir,
 		 s->ca_openpak ? "installed" : "not installed");
 }
 
@@ -213,14 +227,11 @@ int main(int argc, char **argv)
 			snprintf(msg, sizeof(msg), "Failed: %s\n\nLog: " OPENPAK_LOG, err);
 			ask(false, msg);
 		} else if (on) {
-			ask(false, "PSN restored.\n\nSet DNS back to Automatic in Settings > Network Settings > "
-				    "Internet Connection Settings > Custom, then restart.");
+			ask(false, "PSN restored.\n\nRestart the console to put the original names back.");
 			if (ask(true, "Restart the console now?")) { op_reboot(); sleep(10); }
 		} else {
-			ask(false, "OpenPak selected.\n\nTemporary step (automatic redirection is coming): set the console DNS: Settings > Network Settings > "
-				    "Internet Connection Settings > Custom. At DNS choose Manual, Primary DNS "
-				    OPENPAK_DNS ", Secondary the same.\n\nThen restart, and sign in under "
-				    "PlayStation Network with your OpenPak email and password.");
+			ask(false, "OpenPak selected.\n\nRestart the console, then sign in under PlayStation "
+				    "Network with your OpenPak email and password. Keep the network DNS on Automatic.");
 			if (ask(true, "Restart the console now?")) { op_reboot(); sleep(10); }
 		}
 	}

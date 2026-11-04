@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.6
+
+- No more DNS step. The plugin rewrites the PSN host names held in the firmware's memory to
+  equal-length OpenPak names (`.ac.playstation.net` -> `.ac.ps3.openpak.org`, 11 suffixes), the way
+  webMAN MOD's `block_online_servers` / `restore_blocked_urls` rewrite them to nothing. They resolve
+  through public DNS to OpenPak, so the console DNS stays Automatic. Verify-before-patch (the whole
+  name must be present, the write is read back), rescans for libraries that load later, puts every
+  original word back on module stop; a reboot always restores. Not covered: game processes.
+- The status screen shows `Redirect: N names`; the temporary DNS dialog is gone.
+- The name list is `names/psn-names.txt` (match TAB replace, same length), bundled at build time by
+  `tools/stage.sh`; `NAMES_EXTRA=<file>` appends entries of the same shape (where the network's
+  single signed list plugs in). `tools/test_redirect.c` tests the rewrite on the host.
+
 ## v0.2.5
 
 - Clean restart: the restart prompt now unmounts dev_blind, removes the `turnoff` marker and calls

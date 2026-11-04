@@ -36,10 +36,9 @@ Everything is logged to `/dev_hdd0/openpak/patcher.log`. Answer **Yes** to resta
 
 ## 3. DNS
 
-The app does not write the network settings (no public tool is known to edit the xRegistry network
-profile safely, so it shows the steps). Settings > Network Settings > Internet Connection Settings >
-**Custom**. IP Address: Automatic is fine. At **DNS** choose **Manual**, **Primary DNS =
-`145.241.199.19`** (Secondary may be the same). Defaults for MTU/proxy/UPnP. Run the connection test.
+Nothing to do. Leave the console network on **Automatic** DNS. The plugin rewrites the PSN host
+names inside the running firmware to OpenPak names (`auth.api.np.ac.playstation.net` becomes
+`auth.api.np.ac.ps3.openpak.org`), which resolve through public DNS. See [redirect.md](redirect.md).
 
 ## 4. Sign in
 
@@ -48,14 +47,17 @@ Network > **Use an Existing Account** > the OpenPak account **email** and **pass
 sends `bindAccount` to `native-ps3.np.ac.playstation.net`; `np-account` verifies it against the
 `account` core. See `research/ps3/np-account-design.md`.
 
-After the restart, start the app again: Plugin should read "loaded, 3/3 patches". "only n/3" means
-the vsh did not match the expected 4.93 opcodes; sign-in will then fail cleanly.
+After the restart, start the app again: Plugin should read "loaded, 3/3 patches" and Redirect
+"N names" (give it a minute after boot; the plugin rescans, because the sign-in library only loads
+into memory when it is first used). "only n/3" means the vsh did not match the expected 4.93
+opcodes; sign-in will then fail cleanly. If the first sign-in attempt after boot fails, try once
+more: the names of a library that loads on first use are rewritten by the next scan.
 
 ## Switch back to PSN
 
 Start the app and choose **Yes** at "Switch back to PSN?". It restores both CA files from the
-backup, removes the plugin line and file, and asks to restart. Then set DNS back to **Automatic**.
-The backups stay in `/dev_hdd0/openpak/backup/`.
+backup, removes the plugin line and file, and asks to restart; the restart puts the original PSN
+names back (they only ever lived in RAM). The backups stay in `/dev_hdd0/openpak/backup/`.
 
 ## Appendix: manual route (FTP)
 
@@ -66,7 +68,7 @@ Needs webMAN MOD or similar FTP with `dev_flash` writable.
 2. Rename the existing `CA01.cer` > `CA01.cer.orig` and `CA59.cer` > `CA59.cer.orig`, upload ours.
 3. Put `openpak_ca.sprx` in `/dev_hdd0/plugins/` and add its path as a line to
    `/dev_hdd0/boot_plugins.txt`. Reboot.
-4. Rollback: remove the line, restore the `.orig` files, DNS to Automatic.
+4. Rollback: remove the line, restore the `.orig` files, reboot.
 
 ## Notes
 

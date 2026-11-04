@@ -1,9 +1,9 @@
 # Protocol: what the PS3 Patcher patches, and why
 
 OpenPak patches the console, not the game. For a PS3 to use OpenPak's PSN replacement the firmware
-must (1) trust the OpenPak CA, (2) resolve `*.playstation.net` to OpenPak, and (3) accept our chain
-in vsh's pinned check. DNS is XMB configuration (see deploy.md). This document covers 1 and 3,
-which both live inside `vsh.self`.
+must (1) trust the OpenPak CA, (2) resolve its PSN names to OpenPak, and (3) accept our chain
+in vsh's pinned check. Item 2 is the plugin's name rewrite (see redirect.md), not a DNS setting. This
+document covers 1 and 3, which both live inside `vsh.self`.
 
 All addresses are firmware **4.93 retail CEX** `vsh.self` virtual addresses, confirmed from the
 disassembly in `scratch/pier/analysis/vsh/vsh.s` and summarised in
