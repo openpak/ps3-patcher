@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.8 (unreleased)
+
+- Update flow on launch: the app compares the installed setup with what it carries (version marker
+  `/dev_hdd0/openpak/installed.txt`, plugin file byte for byte, CA files, boot_plugins line). If
+  installed but older or different: "OpenPak update available (installed vX, this app vY). Install
+  it?" Yes re-applies with the same backup, verify and rename rules, then "OpenPak setup updated.
+  Restart to apply?"; No goes on to "Switch back to PSN?". Current: status, then "Switch back to
+  PSN?". Not installed: "Switch to OpenPak?". The sprx format is unchanged here.
+
 ## v0.2.7
 
 - v0.2.6 on hardware: plugin never ran ("not run yet" after restarts, sign-in 80710007, no traffic).

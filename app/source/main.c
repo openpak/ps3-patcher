@@ -247,7 +247,28 @@ int main(int argc, char **argv)
 		}
 	}
 
-	on = op_is_openpak(&s);
+	/* Installed but older or different: offer the update first (same backup, verify and rename rules
+	 * as the first install), then fall through to "Switch back to PSN?" when declined. */
+	if (s.update_needed) {
+		char q[200], err[200], msg[700];
+		snprintf(q, sizeof(q), "\n\nOpenPak update available (installed %s%s, this app v%s). Install it?",
+			 s.inst_ver[0] ? "v" : "", s.inst_ver[0] ? s.inst_ver : "older version", OPENPAK_VERSION);
+		strncat(text, q, sizeof(text) - strlen(text) - 1);
+		if (ask(true, text)) {
+			if (!op_switch_openpak(err, sizeof(err))) {
+				snprintf(msg, sizeof(msg), "Failed: %s\n\nLog: " OPENPAK_LOG, err);
+				ask(false, msg);
+			} else if (ask(true, "OpenPak setup updated. Restart to apply?")) {
+				op_reboot();
+				sleep(10);
+			}
+			goto out;
+		}
+		op_status_read(&s);
+		build_status(&s, text, sizeof(text));
+	}
+
+	on = op_is_openpak(&s) || s.installed;
 	strncat(text, on ? "\n\nSwitch back to PSN?" : "\n\nSwitch to OpenPak?", sizeof(text) - strlen(text) - 1);
 	if (ask(true, text)) {
 		char err[200], msg[700];

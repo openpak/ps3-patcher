@@ -518,6 +518,27 @@ void op_status_read(op_status *s)
 		free(st);
 	}
 
+	/* installed version marker, plugin file against the bundled one */
+	st = read_all(OPENPAK_INSTALLED, 256, &len);
+	if (st) {
+		char *p = strstr((char *)st, "version=");
+		if (p) sscanf(p + 8, "%15s", s->inst_ver);
+		free(st);
+	}
+	s->installed = s->plugin_listed || s->inst_ver[0];
+	{
+		u64 il = 0, bl = 0;
+		unsigned char *ib = read_all(OPENPAK_PLUGIN_DST, 4 * 1024 * 1024, &il);
+		unsigned char *bb = read_all(OPENPAK_USRDIR "/openpak_ca.sprx", 4 * 1024 * 1024, &bl);
+		s->plugin_current = ib && bb && il == bl && il && memcmp(ib, bb, il) == 0;
+		free(ib);
+		free(bb);
+	}
+	s->update_needed = s->installed &&
+		(strcmp(s->inst_ver, OPENPAK_VERSION) != 0 || !s->plugin_current || !s->ca_openpak || !s->plugin_listed);
+	logf_("installed=%d version='%s' app=%s plugin_current=%d ca_openpak=%d listed=%d -> update_needed=%d",
+	      s->installed, s->inst_ver, OPENPAK_VERSION, s->plugin_current, s->ca_openpak, s->plugin_listed, s->update_needed);
+
 	if (s->cobra) {
 		read_plugins(s);
 		read_vsh_live(s);
@@ -669,6 +690,11 @@ bool op_switch_openpak(char *err, int err_len)
 		wrote[i] = true;
 		logf_("wrote %s (%llu bytes)", dst, (unsigned long long)cl[i]);
 	}
+	{
+		char mk[96];
+		int n = snprintf(mk, sizeof(mk), "version=%s\n", OPENPAK_VERSION);
+		if (!write_atomic(OPENPAK_INSTALLED, (const unsigned char *)mk, (u64)n)) logf_("could not write %s", OPENPAK_INSTALLED);
+	}
 	ok = true;
 	logf_("switched to OpenPak");
 done:
@@ -709,6 +735,7 @@ bool op_switch_psn(char *err, int err_len)
 	sysFsUnlink(OPENPAK_PLUGIN_DST);
 	sysFsUnlink(OPENPAK_STATUS);
 	sysFsUnlink(OPENPAK_REDIRECT_STATUS);
+	sysFsUnlink(OPENPAK_INSTALLED);
 	ok = true;
 	logf_("switched back to PSN (backups kept)");
 done:

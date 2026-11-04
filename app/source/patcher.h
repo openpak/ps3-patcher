@@ -11,6 +11,7 @@
 #define OPENPAK_PLUGIN_DST "/dev_hdd0/plugins/openpak_ca.sprx"
 #define OPENPAK_BOOT_LIST  "/dev_hdd0/boot_plugins.txt"
 #define OPENPAK_STATUS     OPENPAK_DIR "/plugin.status"
+#define OPENPAK_INSTALLED  OPENPAK_DIR "/installed.txt"
 #define OPENPAK_REDIRECT_STATUS OPENPAK_DIR "/redirect.status"
 
 typedef struct {
@@ -42,12 +43,17 @@ typedef struct {
 	bool plugin_loaded;   /* Cobra has openpak_ca.sprx in a VSH plugin slot */
 	int  plugin_slot;
 	int  plugins_other;   /* other VSH plugins loaded */
+	bool installed;       /* OpenPak setup present: version marker or plugin line */
+	char inst_ver[16];    /* version recorded at install time ("" = unknown, older than 0.2.8) */
+	bool plugin_current;  /* the installed sprx is byte-identical to the one this app carries */
+	bool update_needed;   /* installed, but version, plugin file, CA files or boot line differ */
 	bool backup_ok;       /* both backups exist */
 	bool bundle_ok;       /* CA01/CA59/sprx are in USRDIR */
 } op_status;
 
 void op_status_read(op_status *s);
-bool op_is_openpak(const op_status *s);      /* CA installed and plugin listed */
+bool op_is_openpak(const op_status *s);
+      /* CA installed and plugin listed */
 bool op_supported(const op_status *s, char *why, int why_len);
 
 /* Both return true on success; on failure err holds a one-line reason. */
