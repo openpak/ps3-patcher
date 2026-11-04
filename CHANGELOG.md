@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.1
+
+- XMB icon fills the full 320x176 frame (logo plus "OpenPak / PS3 Patcher"); it was a square tile between
+  dark bars. Source is `app/icon.svg`, same mark and colours as switch-patcher.
+
 ## v0.2.0
 
 - New: `OpenPak-PS3-Patcher-<tag>.pkg`, an XMB app (title id `OPNP00001`) installed from a USB stick

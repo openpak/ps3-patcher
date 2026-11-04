@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 176" width="320" height="176">
+  <!-- PS3 ICON0 is 320x176: same mark and colours as switch-patcher/icon.svg, laid out full-width. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="320" y2="176" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6d70f5"/>
+      <stop offset="100%" stop-color="#3b2fc0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="80" cy="70" r="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity=".18"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="320" height="176" fill="url(#bg)"/>
+  <rect width="320" height="176" fill="url(#glow)"/>
+  <g transform="translate(74 88) scale(.27) translate(-256 -256)" fill="none" stroke="#fff" stroke-linecap="round">
+    <circle cx="256" cy="256" r="180" stroke-width="26"/>
+    <path d="M160 256c0-53 43-96 96-96s96 43 96 96-43 96-96 96" stroke-width="26"/>
+    <circle cx="256" cy="256" r="26" fill="#fff" stroke="none"/>
+  </g>
+  <text x="138" y="92" font-family="Noto Sans" font-weight="800" font-size="40" letter-spacing="-1" fill="#fff">OpenPak</text>
+  <text x="140" y="120" font-family="Noto Sans" font-weight="600" font-size="19" fill="#fff" fill-opacity=".85">PS3 Patcher</text>
+</svg>
