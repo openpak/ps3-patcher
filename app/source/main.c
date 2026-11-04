@@ -139,17 +139,21 @@ static bool ask(bool yesno, const char *text)
 static void build_status(const op_status *s, char *out, size_t n)
 {
 	bool on = op_is_openpak(s);
-	char plug[64];
+	char plug[64], redir[96], live[160], cobp[64];
 
 	if (!s->plugin_listed) snprintf(plug, sizeof(plug), "not installed");
-	else if (!s->plugin_ran) snprintf(plug, sizeof(plug), "installed, not run yet (restart)");
-	else if (s->pokes_applied == s->pokes_total) snprintf(plug, sizeof(plug), "loaded, %d/%d patches", s->pokes_applied, s->pokes_total);
-	else snprintf(plug, sizeof(plug), "loaded, only %d/%d patches", s->pokes_applied, s->pokes_total);
+	else if (!s->plugin_ran) snprintf(plug, sizeof(plug), "installed, no status file yet");
+	else if (s->pokes_applied == s->pokes_total) snprintf(plug, sizeof(plug), "ran, %d/%d patches", s->pokes_applied, s->pokes_total);
+	else snprintf(plug, sizeof(plug), "ran, only %d/%d patches", s->pokes_applied, s->pokes_total);
 
-	char redir[96];
+	if (!s->plugins_known) snprintf(cobp, sizeof(cobp), "query failed");
+	else if (s->plugin_loaded) snprintf(cobp, sizeof(cobp), "OpenPak loaded (slot %d)", s->plugin_slot);
+	else snprintf(cobp, sizeof(cobp), "OpenPak NOT loaded (%d others)", s->plugins_other);
 
 	if (!s->plugin_listed) snprintf(redir, sizeof(redir), "off");
-	else if (!s->redirect_ran) snprintf(redir, sizeof(redir), "not run yet (restart)");
+	else if (s->live_names_rewritten > 0 && !s->redirect_ran)
+		snprintf(redir, sizeof(redir), "%d names in vsh", s->live_names_rewritten);
+	else if (!s->redirect_ran) snprintf(redir, sizeof(redir), "not run yet");
 	else if (!strcmp(s->redirect_state, "ok"))
 		snprintf(redir, sizeof(redir), "%d names%s", s->redirect_names,
 			 s->redirect_failed ? " (some did not verify, see log)" : "");
@@ -158,25 +162,31 @@ static void build_status(const op_status *s, char *out, size_t n)
 	else if (!strcmp(s->redirect_state, "nothread")) snprintf(redir, sizeof(redir), "unavailable (thread did not start)");
 	else snprintf(redir, sizeof(redir), "%s", s->redirect_state);
 
+	if (!s->vsh_found) snprintf(live, sizeof(live), "vsh not found");
+	else snprintf(live, sizeof(live), "pokes %d/%d, CN %s, names %d/%d",
+		      s->live_poke_patched, s->live_poke_total,
+		      s->live_cn_known ? (s->live_cn_patched ? "yes" : "no") : "?",
+		      s->live_names_rewritten, s->live_names_total);
+
 	snprintf(out, n,
 		 "OpenPak PS3 Patcher %s\n\n"
 		 "Network: %s\n"
 		 "Firmware: %s%s\n"
-		 "lv2 peek: %s\n"
-		 "Cobra: %s\n"
+		 "Cobra: %s, HEN: %s\n"
 		 "stage2: %s\n"
-		 "HEN: %s\n"
-		 "Plugin: %s\n"
+		 "Cobra plugins: %s\n"
+		 "Plugin file: %s\n"
+		 "vsh now: %s\n"
 		 "Redirect: %s\n"
 		 "OpenPak CA: %s",
 		 OPENPAK_VERSION,
 		 on ? "OpenPak" : "PSN",
 		 s->fw_known ? s->fw : "unknown", s->fw_ok ? " CEX" : "",
-		 s->peek ? "yes" : "no",
-		 s->cobra ? s->payload : "appears to be off",
+		 s->cobra ? s->payload : "appears to be off", s->hen ? "yes" : "no",
 		 s->stage2 ? "present" : s->stage2_off ? "renamed (disabled)" : "not found",
-		 s->hen ? "yes" : "no",
+		 cobp,
 		 plug,
+		 live,
 		 redir,
 		 s->ca_openpak ? "installed" : "not installed");
 }
@@ -202,7 +212,7 @@ static void quit_clean(void)
 int main(int argc, char **argv)
 {
 	op_status s;
-	char text[1024], why[256];
+	char text[1400], why[256];
 	bool on;
 
 	(void)argc; (void)argv;
@@ -216,6 +226,25 @@ int main(int argc, char **argv)
 		strncat(text, why, sizeof(text) - strlen(text) - 1);
 		ask(false, text);
 		goto out;
+	}
+
+	/* The plugin is installed but Cobra has not loaded it: offer to load it now, and show the raw
+	 * return code of Cobra's load call (0 = loaded). */
+	if (s.plugin_file && !s.plugin_loaded) {
+		strncat(text, "\n\nThe plugin is not loaded. Load it now?", sizeof(text) - strlen(text) - 1);
+		if (ask(true, text)) {
+			int ret = 0, slot = -1;
+			char msg[300];
+			bool ok = op_load_plugin(&ret, &slot);
+			sleep(7);
+			snprintf(msg, sizeof(msg), "Cobra load call: slot %d, return 0x%08x (%s).", slot, (unsigned)ret,
+				 ok ? "accepted" : "rejected or failed");
+			ask(false, msg);
+			op_status_read(&s);
+			build_status(&s, text, sizeof(text));
+		} else {
+			build_status(&s, text, sizeof(text));
+		}
 	}
 
 	on = op_is_openpak(&s);

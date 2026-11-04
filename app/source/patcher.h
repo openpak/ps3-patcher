@@ -33,6 +33,15 @@ typedef struct {
 	bool redirect_ran;    /* redirect.status written by this boot's plugin */
 	char redirect_state[16];  /* ok | hen | nolv2 | nothread | restored */
 	int  redirect_names, redirect_of, redirect_live, redirect_passes, redirect_failed;
+	bool vsh_found;       /* PS3MAPI found the vsh process */
+	int  vsh_pid;
+	int  live_poke_patched, live_poke_orig, live_poke_total;  /* the u32 pokes, read from vsh memory */
+	bool live_cn_known, live_cn_patched;                      /* the pinned CN string field */
+	int  live_names_total, live_names_rewritten, live_names_orig;  /* static PSN names in vsh */
+	bool plugins_known;   /* PS3MAPI answered the VSH plugin query */
+	bool plugin_loaded;   /* Cobra has openpak_ca.sprx in a VSH plugin slot */
+	int  plugin_slot;
+	int  plugins_other;   /* other VSH plugins loaded */
 	bool backup_ok;       /* both backups exist */
 	bool bundle_ok;       /* CA01/CA59/sprx are in USRDIR */
 } op_status;
@@ -44,6 +53,10 @@ bool op_supported(const op_status *s, char *why, int why_len);
 /* Both return true on success; on failure err holds a one-line reason. */
 bool op_switch_openpak(char *err, int err_len);
 bool op_switch_psn(char *err, int err_len);
+
+/* Load the plugin into a free Cobra VSH plugin slot now (Cobra syscall 8 opcode 0x1EE7). ret is the
+ * raw return value, slot the slot used (-1 when none was free). */
+bool op_load_plugin(int *ret, int *slot);
 
 void op_reboot(void);
 

@@ -96,7 +96,11 @@ static long sc8(long n, long a, long b, long c, long d, long e, long f, long g, 
 
 /* Boot status for the Patcher app: /dev_hdd0/openpak/plugin.status = "applied=A verified=V total=T".
  * Best effort; failure to write changes nothing about the pokes. */
-static void write_status(int applied, int verified, int total)
+/* Poke counts kept for retries: [3] = 1 while plugin.status is not yet on disk. At boot the HDD
+ * may not be mounted when the plugin starts, so a failed write is retried by the scan thread. */
+static volatile int g_pk[4] __attribute__((section(".data.rel.ro"))) = { 0, 0, 0, 0 };
+
+static int write_status(int applied, int verified, int total)
 {
 	char buf[48];
 	int n = 0;
@@ -115,10 +119,14 @@ static void write_status(int applied, int verified, int total)
 		buf[n++] = (k == 2) ? '\n' : ' ';
 	}
 	/* sys_fs_open(path, O_WRONLY|O_CREAT|O_TRUNC, &fd, mode 0666, NULL, 0) */
-	if (sc4(801, (long)"/dev_hdd0/openpak/plugin.status", 0x241, (long)&fd, 0666) != 0)
-		return;
+	if (sc4(801, (long)"/dev_hdd0/openpak/plugin.status", 0x241, (long)&fd, 0666) != 0) {
+		sc4(811, (long)"/dev_hdd0/openpak", 0777, 0, 0);   /* sys_fs_mkdir, then once more */
+		if (sc4(801, (long)"/dev_hdd0/openpak/plugin.status", 0x241, (long)&fd, 0666) != 0)
+			return -1;
+	}
 	sc4(803, fd, (long)buf, n, (long)&wrote);   /* sys_fs_write */
 	sc4(804, fd, 0, 0, 0);                      /* sys_fs_close */
+	return wrote == (unsigned long long)n ? 0 : -1;
 }
 
 /* ---- PSN name redirect --------------------------------------------------------------------- */
@@ -160,14 +168,18 @@ static void lv1_poke(u64 a, u64 v)
 #define RD_RUN()       (g_run)
 #include "redirect.h"
 
-static void write_file(const char *path, const char *buf, int n)
+static int write_file(const char *path, const char *buf, int n)
 {
 	int fd = -1;
 	unsigned long long wrote = 0;
 	/* sys_fs_open(path, O_WRONLY|O_CREAT|O_TRUNC, &fd, mode 0666, NULL, 0) */
-	if (sc4(801, (long)path, 0x241, (long)&fd, 0666) != 0) return;
+	if (sc4(801, (long)path, 0x241, (long)&fd, 0666) != 0) {
+		sc4(811, (long)"/dev_hdd0/openpak", 0777, 0, 0);
+		if (sc4(801, (long)path, 0x241, (long)&fd, 0666) != 0) return -1;
+	}
 	sc4(803, fd, (long)buf, n, (long)&wrote);   /* sys_fs_write */
 	sc4(804, fd, 0, 0, 0);                      /* sys_fs_close */
+	return wrote == (unsigned long long)n ? 0 : -1;
 }
 
 static int put_str(char *b, int n, const char *s)
@@ -188,7 +200,7 @@ static int put_num(char *b, int n, unsigned long v)
 
 /* /dev_hdd0/openpak/redirect.status: one summary line, then "<live count> TAB <match>" per entry.
  * state: ok | hen (no lv1 poke under HEN) | nolv2 (lv2 base not found) | nothread. */
-static void write_redirect_status(const char *state, const struct rd_state *st)
+static int write_redirect_status(const char *state, const struct rd_state *st)
 {
 	char buf[1024];
 	int n = 0, k;
@@ -207,7 +219,13 @@ static void write_redirect_status(const char *state, const struct rd_state *st)
 		n = put_str(buf, n, openpak_names[k].from);
 		buf[n++] = '\n';
 	}
-	write_file("/dev_hdd0/openpak/redirect.status", buf, n);
+	return write_file("/dev_hdd0/openpak/redirect.status", buf, n);
+}
+
+/* Retry plugin.status until /dev_hdd0 accepts the write. */
+static void flush_status(void)
+{
+	if (g_pk[3] && write_status(g_pk[0], g_pk[1], g_pk[2]) == 0) g_pk[3] = 0;
 }
 
 /* The scan thread. Raw lv2 thread: no libc, no TLS, so it only uses its own stack, the raw
@@ -217,7 +235,7 @@ static void write_redirect_status(const char *state, const struct rd_state *st)
 static void scan_thread(u64 arg)
 {
 	struct rd_state st;
-	int lastnbk = -1, lastfail = -1, i;
+	int lastnbk = -1, lastfail = -1, i, dirty = 0;
 	(void)arg;
 
 	rd_init(&st);
@@ -226,19 +244,27 @@ static void scan_thread(u64 arg)
 		if (st.lv2off) break;
 	}
 	if (!st.lv2off) {
-		write_redirect_status("nolv2", NULL);
+		for (i = 0; i < 120 && g_run; i++) {
+			flush_status();
+			if (write_redirect_status("nolv2", NULL) == 0) break;
+			usleep_(1000000);
+		}
 	} else {
-		usleep_(5000000);
+		for (i = 0; i < 5; i++) { flush_status(); usleep_(1000000); }
 		while (g_run) {
 			rd_pass(&st);
 			if (st.nbk != lastnbk || st.failed != lastfail || st.passes == 1) {
-				write_redirect_status("ok", &st);
+				dirty = 1;
 				lastnbk = st.nbk;
 				lastfail = st.failed;
 			}
 			{
 				unsigned long gap = st.passes < 24 ? 2 : st.passes < 60 ? 20 : 120;
-				for (i = 0; i < (int)gap && g_run; i++) usleep_(1000000);
+				for (i = 0; i < (int)gap && g_run; i++) {
+					flush_status();
+					if (dirty && write_redirect_status("ok", &st) == 0) dirty = 0;
+					usleep_(1000000);
+				}
 			}
 		}
 		rd_restore(&st);
@@ -299,7 +325,8 @@ static void apply_pokes(void)
 		applied++;
 	}
 #endif
-	write_status(applied, verified, total);
+	g_pk[0] = applied; g_pk[1] = verified; g_pk[2] = total;
+	g_pk[3] = write_status(applied, verified, total) != 0;
 }
 
 /* PRX module entry points, exported by NID from module.S. */

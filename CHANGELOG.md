@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.7
+
+- v0.2.6 on hardware: plugin never ran ("not run yet" after restarts, sign-in 80710007, no traffic).
+  The status no longer depends on the plugin writing files. The app asks Cobra directly (PS3MAPI,
+  syscall 8 opcode 0x7777) which VSH plugin slots are loaded (0x47), and reads the three trust
+  pokes, the pinned CN field and the 32 static PSN names in the vsh process (0x31). The screen shows
+  "Cobra plugins", "vsh now: pokes a/3, CN yes|no, names n/32".
+- "Load it now?" appears when the plugin file is installed but Cobra has not loaded it: it calls
+  Cobra's load-VSH-plugin (opcode 0x1EE7) into a free slot and shows the raw return code.
+- The plugin retries its status files until /dev_hdd0 accepts the write (creates the directory
+  too), instead of giving up at boot.
+
 ## v0.2.6
 
 - No more DNS step. The plugin rewrites the PSN host names held in the firmware's memory to
