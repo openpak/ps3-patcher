@@ -1,79 +1,81 @@
 # Deploy: installing the PS3 Patcher on a console
 
 Read `research/ps3/console-setup.md` first for the route choice and the firmware-version check.
-This is the step list. **Back up before any `dev_flash` write -- a bad write can brick.**
+**A bad `dev_flash` write can brick. The app backs up first, writes through a temp file, reads it
+back and only then renames; it still helps to have a flash backup.**
 
-## 0. Prerequisites (ask the owner)
+## Requirements
 
-- Exact firmware version (Settings -> System -> System Information). These addresses are **4.93
-  retail CEX** only; re-derive for anything else (research doc).
-- CFW or HEN present. Needed to write `dev_flash` and to load a VSH plugin:
-  - **Evilnat CFW 4.93 (CEX)** -- preferred, persistent.
-  - **HFW 4.93 + HEN** -- for OFW-locked consoles; works identically but HEN must be re-enabled
-    after each boot.
-- Console model (CECH-xxxx) -- decides CFW-capable vs HEN-only.
-- A way to reach the console's filesystem: webMAN MOD (FTP) or multiMAN.
+- **Firmware 4.93 CEX** (Settings > System Settings > System Information). The app refuses any
+  other version and changes nothing.
+- **Evilnat CFW 4.93 (preferred) or HFW 4.93 + HEN** (re-enable HEN after every boot). The app
+  needs the Cobra/HEN syscalls to mount `dev_flash` writable and to load the plugin at boot.
+- A USB stick (FAT32) and about 1 MB free on `dev_flash`.
 
-## 1. Back up
+## 1. Install the package
 
-- Full NAND/NOR flash dump if you have a hardware flasher, E3, or multiMAN's flash backup.
-- At minimum, FTP-copy the whole `/dev_flash/data/cert/` directory off the console.
+1. Download `OpenPak-PS3-Patcher-<tag>.pkg` from the
+   [releases](https://github.com/openpak/ps3-patcher/releases) and copy it to the **root** of the USB stick.
+2. Plug it in. XMB: **Game > Package Manager > Install Package Files > Standard**, choose the pkg.
+   Title id `OPNP00001`; it appears in the Game column as **OpenPak PS3 Patcher**.
 
-## 2. Build the files
+## 2. Switch to OpenPak
 
-From the repo root on your workstation:
-```sh
-make stage     # writes dist/dev_flash/data/cert/{CA01,CA59}.cer and plugin/openpak_ca_patch.h
-make plugin    # builds plugin/openpak_ca.sprx  (needs PSL1GHT; else take it from the CI release)
-```
+Start the app. It shows Network, Firmware, Custom firmware, Plugin and OpenPak CA. Choose **Yes**
+at "Switch to OpenPak?". It then:
 
-## 3. Install the CA files
+1. backs up `/dev_flash/data/cert/CA01.cer` and `CA59.cer` to `/dev_hdd0/openpak/backup/` (once; an
+   existing backup is never overwritten),
+2. copies `openpak_ca.sprx` to `/dev_hdd0/plugins/` and appends
+   `/dev_hdd0/plugins/openpak_ca.sprx` to `/dev_hdd0/boot_plugins.txt` (other lines untouched),
+3. mounts `dev_flash` writable (`/dev_blind`), checks free space, and replaces the two CA files via
+   temp name + read-back + rename; if the second fails the first is restored from the backup,
+4. unmounts `dev_blind`.
 
-Over FTP (webMAN MOD), into `/dev_flash/data/cert/`:
-1. Rename the existing `CA01.cer` -> `CA01.cer.orig` and `CA59.cer` -> `CA59.cer.orig` (keep them;
-   this is your file-level rollback).
-2. Upload `dist/dev_flash/data/cert/CA01.cer` and `CA59.cer`.
+Everything is logged to `/dev_hdd0/openpak/patcher.log`. Answer **Yes** to restart.
 
-`dev_flash` must be mounted writable -- CFW does this; under HEN, webMAN's FTP exposes it writable
-while HEN is active. If the upload is refused, `dev_flash` is not writable: do not force it.
+## 3. DNS
 
-## 4. Install the VSH plugin
+The app does not write the network settings (no public tool is known to edit the xRegistry network
+profile safely, so it shows the steps). Settings > Network Settings > Internet Connection Settings >
+**Custom**. IP Address: Automatic is fine. At **DNS** choose **Manual**, **Primary DNS =
+`145.241.199.19`** (Secondary may be the same). Defaults for MTU/proxy/UPnP. Run the connection test.
 
-1. Copy `plugin/openpak_ca.sprx` to `/dev_hdd0/plugins/openpak_ca.sprx` (any readable path works).
-2. Add its path as a line in `/dev_hdd0/boot_plugins.txt` (create the file if absent). One plugin
-   path per line, for example:
-   ```
-   /dev_hdd0/plugins/openpak_ca.sprx
-   ```
-3. Reboot. Cobra loads the plugin into the vsh process; it verifies the original opcodes and
-   applies the pokes. If the firmware is not the one these addresses target, it no-ops and the
-   trust change silently does not take (sign-in will fail cleanly) -- re-derive and rebuild.
-
-## 5. DNS
-
-Settings -> Network Settings -> Internet Connection Settings -> **Custom**. IP Address: Automatic
-is fine. At **DNS**, choose **Manual**, **Primary DNS = `145.241.199.19`** (Secondary may be the
-same). Defaults for MTU/proxy/UPnP. Run the connection test.
-
-## 6. Sign in
+## 4. Sign in
 
 Create an OpenPak account on the website first (it owns the identity). On the PS3: PlayStation
-Network -> **Use an Existing Account** -> enter the OpenPak account **email** and **password**.
-The firmware sends `bindAccount` to `native-ps3.np.ac.playstation.net`; `np-account` verifies it
-against the `account` core and returns the NP credential and your **online ID**. See
-`research/ps3/np-account-design.md`.
+Network > **Use an Existing Account** > the OpenPak account **email** and **password**. The firmware
+sends `bindAccount` to `native-ps3.np.ac.playstation.net`; `np-account` verifies it against the
+`account` core. See `research/ps3/np-account-design.md`.
 
-## Rollback
+After the restart, start the app again: Plugin should read "loaded, 3/3 patches". "only n/3" means
+the vsh did not match the expected 4.93 opcodes; sign-in will then fail cleanly.
 
-1. Remove the `openpak_ca.sprx` line from `/dev_hdd0/boot_plugins.txt` (or delete the sprx);
-   reboot. The pokes were RAM-only; they are gone.
-2. Restore `CA01.cer.orig` -> `CA01.cer` and `CA59.cer.orig` -> `CA59.cer`.
-3. Set DNS back to Automatic.
+## Switch back to PSN
+
+Start the app and choose **Yes** at "Switch back to PSN?". It restores both CA files from the
+backup, removes the plugin line and file, and asks to restart. Then set DNS back to **Automatic**.
+The backups stay in `/dev_hdd0/openpak/backup/`.
+
+## Appendix: manual route (FTP)
+
+Needs webMAN MOD or similar FTP with `dev_flash` writable.
+
+1. Build or take the files from the release zip: `dev_flash/data/cert/CA01.cer`, `CA59.cer`,
+   `openpak_ca.sprx`.
+2. Rename the existing `CA01.cer` > `CA01.cer.orig` and `CA59.cer` > `CA59.cer.orig`, upload ours.
+3. Put `openpak_ca.sprx` in `/dev_hdd0/plugins/` and add its path as a line to
+   `/dev_hdd0/boot_plugins.txt`. Reboot.
+4. Rollback: remove the line, restore the `.orig` files, DNS to Automatic.
 
 ## Notes
 
 - The OpenPak ps3 TLS terminator in front of `np-account` must offer RSA key-exchange suites and
-  TLS 1.0-1.2 (the 4.93 stack offers no ECDHE) -- a server-side prerequisite, see
-  `research/ps3/psn-signin-findings.md`. Not a console step.
-- Everything here was proven on Pier only; the VSH-plugin delivery and the runtime poke have not
-  yet been run on real hardware.
+  TLS 1.0-1.2 (the 4.93 stack offers no ECDHE) -- server side, see
+  `research/ps3/psn-signin-findings.md`.
+- How `dev_blind` is mounted: lv2 syscall 837 (`sys_fs_mount`) with device
+  `CELL_FS_IOS:BUILTIN_FLSH1`, filesystem `CELL_FS_FAT`, path `/dev_blind`, write-protect 0;
+  unmount is syscall 838. Same calls as webMAN MOD's standalone homebrew (`_Projects_/updater`,
+  `include/file/file_devs.h` in github.com/aldostools/webMAN-MOD).
+- Proven on Pier only: the TLS/trust behaviour. Not yet run on a real console: the package install,
+  the dev_blind write, the plugin load and the runtime pokes.

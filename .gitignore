@@ -5,3 +5,8 @@ plugin/openpak_ca_patch.h
 plugin/*.elf
 plugin/*.prx
 plugin/*.sprx
+app/build/
+app/*.elf
+app/*.self
+app/*.pkg
+plugin/*.o

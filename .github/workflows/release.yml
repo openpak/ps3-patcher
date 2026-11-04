@@ -1,6 +1,7 @@
 name: release
 
-# A vX.Y.Z tag builds the VSH plugin and publishes the install bundle; pushes to main build
+# A vX.Y.Z tag builds the VSH plugin and the installable OpenPak-PS3-Patcher-<tag>.pkg (the user
+# download) and publishes them plus the manual-install bundle; pushes to main build
 # nothing (OpenPak repos build on tags only). The staged CA files are produced at install time by
 # tools/stage.sh (they are just the public CA, pin-checked), so the release asset is the sprx plus
 # the staging tooling.
@@ -32,6 +33,12 @@ jobs:
           docker run --rm -v "$PWD":/w -w /w "$PS3DEV_IMAGE" \
             sh -c 'make -C plugin'
 
+      - name: build the installable package (PSL1GHT container)
+        run: |
+          docker run --rm -v "$PWD":/w -w /w "$PS3DEV_IMAGE" \
+            sh -c "make -C app pkg APP_VERSION=${GITHUB_REF_NAME#v}"
+          cp app/OpenPak-PS3-Patcher-${GITHUB_REF_NAME}.pkg .
+
       - name: bundle
         run: |
           mkdir -p out/dev_flash/data/cert
@@ -43,5 +50,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: ps3-patcher-*.zip
+          files: |
+            OpenPak-PS3-Patcher-*.pkg
+            ps3-patcher-*.zip
           fail_on_unmatched_files: true

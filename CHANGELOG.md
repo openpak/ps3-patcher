@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.0
+
+- New: `OpenPak-PS3-Patcher-<tag>.pkg`, an XMB app (title id `OPNP00001`) installed from a USB stick
+  with the Package Manager. Status screen, switch to OpenPak and back to PSN, restart prompt.
+  4.93 CEX only; stock CA01/CA59 backed up once, dev_flash writes via temp file + read-back +
+  rename, plugin line added to and removed from `boot_plugins.txt` without touching other lines,
+  log at `/dev_hdd0/openpak/patcher.log`. DNS is shown as on-screen steps, not written.
+- Plugin: writes `/dev_hdd0/openpak/plugin.status` at boot so the app can show whether it loaded.
+- Docs: user flow first, manual FTP route as an appendix.
+
 ## v0.1.1
 
 - Fix the release build: the previous workflow referenced a non-existent container image. It now
