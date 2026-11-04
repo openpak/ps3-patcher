@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <time.h>
 #include <ppu-lv2.h>
@@ -263,12 +264,22 @@ static bool is_lv2_error(u64 r)
 }
 
 /* Independent signals; every raw result goes to the log so a run shows which one works.
- *  peek:  syscall 6 (CFW/HEN lv2 peek) on an address inside the lv2 image;
- *  cobra: syscall 8 opcode 0x7000 (Cobra/HEN get version) answering with anything but an error;
- *  stage2.bin: Evilnat's Cobra payload file; hen: PS3HEN's /dev_hdd0/hen directory. */
+ *
+ *  peek:   syscall 6 (CFW/HEN lv2 peek) on an address inside the lv2 image.
+ *  cobra:  exactly webMAN MOD's is_cobra_based() (_Projects_/vsh_menu/include/sys_info.h): syscall 8
+ *          opcode 0x7000 (SYSCALL8_OPCODE_GET_VERSION) takes a POINTER to a u32 and writes the
+ *          version there; the return value is only a status. A u32 preset to 0x99999999 that has
+ *          changed after a non-negative return means Cobra. (v0.2.3 passed a NULL pointer and read
+ *          the return value as the version, which is why it saw "not active" on a working Cobra.)
+ *  payload: opcode 0x1337 -> 0x1337 = PS3HEN; 0x7FFF -> 0x666 = Mamba; 0x7001 writes a u16 version.
+ *  stage2: where Cobra's stage2 lives (webMAN's disable_cobra_stage2 renames these):
+ *          sys/stage2.bin, rebug/cobra/stage2.cex and .dex; the renamed forms mean "disabled". */
 static void detect_cfw(op_status *s)
 {
 	u64 r;
+	volatile u32 version = 0x99999999;
+	volatile u16 version2 = 0;
+	bool hen = false, mamba = false;
 
 	{
 		lv2syscall1(6, 0x8000000000010000ULL);
@@ -278,17 +289,43 @@ static void detect_cfw(op_status *s)
 	s->peek = !is_lv2_error(r);
 
 	{
-		lv2syscall2(8, 0x7000, 0);
+		lv2syscall2(8, 0x7000, (u64)(u32)(uintptr_t)&version);
 		r = (u64)p1;
 	}
 	s->cobra_raw = r;
-	s->cobra = !is_lv2_error(r);
+	s->version_raw = version;
+	s->cobra = (s32)r >= 0 && version != 0x99999999;
 
-	s->stage2 = exists("/dev_flash/sys/stage2.bin");
-	s->hen = exists("/dev_hdd0/hen");
-	logf_("detect: peek raw=%016llx -> %d; cobra(sc8 0x7000) raw=%016llx -> %d; stage2.bin=%d; hen=%d",
-	      (unsigned long long)s->peek_raw, s->peek, (unsigned long long)s->cobra_raw, s->cobra,
-	      s->stage2, s->hen);
+	if (s->cobra) {
+		u64 h, m, q;
+		{ lv2syscall1(8, 0x1337); h = (u64)p1; }
+		{ lv2syscall1(8, 0x7FFF); m = (u64)p1; }
+		{ lv2syscall2(8, 0x7001, (u64)(u32)(uintptr_t)&version2); q = (u64)p1; }
+		hen = (s32)h == 0x1337;
+		mamba = (s32)m == 0x666;
+		logf_("detect: hen(0x1337)=%llx mamba(0x7fff)=%llx version2(0x7001) ret=%llx val=%04x",
+		      (unsigned long long)h, (unsigned long long)m, (unsigned long long)q, (unsigned)version2);
+		snprintf(s->payload, sizeof(s->payload), "%s %X.%X", hen ? "PS3HEN" : mamba ? "Mamba" : "Cobra",
+			 (unsigned)(version2 >> 8), (version2 & 0xF) ? (unsigned)(version2 & 0xFF) : (unsigned)((version2 >> 4) & 0xF));
+	}
+	s->hen = hen;
+
+	{
+		static const char *const on[] = { "/dev_flash/sys/stage2.bin", "/dev_flash/rebug/cobra/stage2.cex",
+						  "/dev_flash/rebug/cobra/stage2.dex" };
+		static const char *const off[] = { "/dev_flash/sys/stage2_disabled.bin", "/dev_flash/rebug/cobra/stage2.cex.bak",
+						   "/dev_flash/rebug/cobra/stage2.dex.bak" };
+		unsigned i;
+		for (i = 0; i < 3; i++) {
+			bool a = exists(on[i]), b = exists(off[i]);
+			s->stage2 = s->stage2 || a;
+			s->stage2_off = s->stage2_off || b;
+			logf_("detect: %s=%d %s=%d", on[i], a, off[i], b);
+		}
+	}
+	logf_("detect: peek raw=%016llx -> %d; cobra(sc8 0x7000) ret=%016llx version=%08x -> %d; payload='%s'; "
+	      "stage2=%d stage2_renamed=%d", (unsigned long long)s->peek_raw, s->peek,
+	      (unsigned long long)s->cobra_raw, s->version_raw, s->cobra, s->payload, s->stage2, s->stage2_off);
 }
 
 void op_status_read(op_status *s)
@@ -365,9 +402,8 @@ bool op_supported(const op_status *s, char *why, int why_len)
 		return false;
 	}
 	if (!s->cobra) {
-		snprintf(why, why_len, "Custom firmware found, but Cobra is not active (plugins would not "
-			 "load). On Evilnat: open its Cobra Tools menu and choose Toggle Cobra, then "
-			 "restart and run this app again.");
+		snprintf(why, why_len, "Cobra appears to be off (sc8 ret %08x, version %08x). Nothing was "
+			 "changed. Details: " OPENPAK_LOG, (unsigned)s->cobra_raw, s->version_raw);
 		return false;
 	}
 	if (!s->peek) {

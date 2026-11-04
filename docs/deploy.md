@@ -70,11 +70,14 @@ Needs webMAN MOD or similar FTP with `dev_flash` writable.
 
 ## Notes
 
-- Detection signals (raw values in `patcher.log`): lv2 peek = syscall 6; Cobra = syscall 8 opcode 0x7000;
-  `stage2.bin`; PS3HEN marker `/dev_hdd0/hen`. Evilnat's "Toggle Cobra" option (xai_plugin, Cobra
-  Tools; reboot required) is documented at github.com/Evilnat/xai_plugin and the Evilnat release
-  threads on psx-place.com. The exact XMB location on 4.93 is not verified here.
-
+- Detection signals (raw values in `patcher.log`): lv2 peek = syscall 6. Cobra = webMAN MOD's
+  `is_cobra_based()`: syscall 8 opcode `0x7000` takes a pointer to a u32 preset to `0x99999999`;
+  a non-negative return and a changed value mean Cobra (the version is written through the
+  pointer, not returned). Payload type: opcode `0x1337` = PS3HEN, `0x7FFF` = Mamba, `0x7001` = u16
+  version. stage2: `/dev_flash/sys/stage2.bin`, `/dev_flash/rebug/cobra/stage2.cex|dex`; the
+  `.bak` / `stage2_disabled.bin` forms mean disabled. Source: github.com/aldostools/webMAN-MOD,
+  `_Projects_/vsh_menu/include/sys_info.h` and `rebug.h`. If Cobra reads as off the app changes
+  nothing and does not advise toggling it.
 - The OpenPak ps3 TLS terminator in front of `np-account` must offer RSA key-exchange suites and
   TLS 1.0-1.2 (the 4.93 stack offers no ECDHE) -- server side, see
   `research/ps3/psn-signin-findings.md`.

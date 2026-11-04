@@ -151,7 +151,8 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 "Network: %s\n"
 		 "Firmware: %s%s\n"
 		 "lv2 peek: %s\n"
-		 "Cobra: %s (stage2.bin %s)\n"
+		 "Cobra: %s\n"
+		 "stage2: %s\n"
 		 "HEN: %s\n"
 		 "Plugin: %s\n"
 		 "OpenPak CA: %s",
@@ -159,7 +160,8 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 on ? "OpenPak" : "PSN",
 		 s->fw_known ? s->fw : "unknown", s->fw_ok ? " CEX" : "",
 		 s->peek ? "yes" : "no",
-		 s->cobra ? "active" : "not active", s->stage2 ? "present" : "absent",
+		 s->cobra ? s->payload : "appears to be off",
+		 s->stage2 ? "present" : s->stage2_off ? "renamed (disabled)" : "not found",
 		 s->hen ? "yes" : "no",
 		 plug,
 		 s->ca_openpak ? "installed" : "not installed");

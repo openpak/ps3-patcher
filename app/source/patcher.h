@@ -19,9 +19,12 @@ typedef struct {
 	bool fw_ok;           /* 4.93 CEX */
 	bool peek;            /* lv2 peek (syscall 6) answers: CFW or HEN */
 	bool cobra;           /* Cobra syscall 8 opcode 0x7000 answers: Cobra active */
-	bool stage2;          /* /dev_flash/sys/stage2.bin present (Evilnat's Cobra) */
+	bool stage2;          /* an active stage2 file exists (sys/stage2.bin, rebug/cobra/stage2.cex|dex) */
+	bool stage2_off;      /* only the renamed (disabled) stage2 files exist */
+	char payload[24];     /* "Cobra 8.5", "Mamba ..", "PS3HEN .." or "" */
 	bool hen;             /* PS3HEN marker present */
 	unsigned long long peek_raw, cobra_raw;
+	unsigned int version_raw;   /* the u32 Cobra wrote through the pointer (0x99999999 = untouched) */
 	bool ca_openpak;      /* both CA files in dev_flash equal the bundled OpenPak CA */
 	bool plugin_listed;   /* our line is in boot_plugins.txt */
 	bool plugin_file;     /* sprx present in /dev_hdd0/plugins */

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.4
+
+- Cobra detection now matches webMAN MOD's `is_cobra_based()`: the version comes back through a
+  pointer argument (preset 0x99999999), not as the return value; v0.2.3 passed NULL and so called a
+  working Cobra "not active". Payload (Cobra/Mamba/PS3HEN) and version shown; stage2 checked at
+  `sys/stage2.bin` and `rebug/cobra/stage2.cex|dex` (and their renamed-disabled forms).
+- A Cobra-off refusal says "Cobra appears to be off" with the raw values and the log path. It never
+  advises toggling Cobra.
+
 ## v0.2.3
 
 - Exit path rebuilt after the whole-console freeze on a refusal: v0.2.0 and v0.2.2-era code left
