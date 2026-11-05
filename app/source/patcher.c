@@ -598,7 +598,15 @@ static void build_detail(op_status *s)
 	size_t n;
 
 	d[0] = 0;
-	snprintf(d, dn, "App v" OPENPAK_VERSION "\nPS3MAPI %s\nSlots:%s\n", s->ps3mapi_note[0] ? s->ps3mapi_note : "-", g_slot_line);
+	{
+		time_t now = time(NULL);
+		struct tm *g = gmtime(&now);
+		char clk[40] = "?";
+		if (g) snprintf(clk, sizeof(clk), "%04d-%02d-%02d %02d:%02d", g->tm_year + 1900, g->tm_mon + 1, g->tm_mday, g->tm_hour, g->tm_min);
+		/* TLS certificates are valid from a date (the OpenPak CA from 2026-09-07, leaves from an hour ago): a console clock before that fails every handshake */
+		snprintf(d, dn, "App v" OPENPAK_VERSION ", console clock %s UTC\nPS3MAPI %s\nSlots:%s\n", clk,
+			 s->ps3mapi_note[0] ? s->ps3mapi_note : "-", g_slot_line);
+	}
 	boot_list_line(d, dn);
 	n = strlen(d);
 	snprintf(d + n, dn - n, "nocobra list: %s\nSize check: ", exists("/dev_hdd0/boot_plugins_nocobra.txt") ? "present" : "absent");
@@ -611,18 +619,19 @@ static void build_detail(op_status *s)
 	snprintf(d + n, dn - n, "Ran at boot: A %s, C %s, D %s\n", s->plugin_ran ? "yes" : "no",
 		 s->plugin_c_ran ? "yes" : "no", s->plugin_d_ran ? "yes" : "no");
 	n = strlen(d);
-	/* the plugin's own step trace (written by module_start and the scan thread): last 7 lines */
+	/* the plugin's own step trace: the whole file goes to s->log (main.c pages it), the details only
+	 * say how long it is */
 	{
 		u64 pl = 0;
 		unsigned char *pb = exists(OPENPAK_PLUGIN_LOG) ? read_all(OPENPAK_PLUGIN_LOG, 64 * 1024, &pl) : NULL;
+		s->log[0] = 0;
 		if (!pb || !pl) {
 			n += snprintf(d + n, dn - n, "plugin.log: %s\n", pb ? "empty" : "absent (module_start never wrote)");
 		} else {
-			u64 i = pl, lines = 0, from;
-			while (i > 0 && lines < 8) { i--; if (pb[i] == '\n' && i + 1 < pl) lines++; }
-			from = (lines >= 8) ? i + 1 : 0;
-			n += snprintf(d + n, dn - n, "plugin.log (%llu B), last lines:\n%.*s", (unsigned long long)pl,
-				      (int)(pl - from > 420 ? 420 : pl - from), (const char *)pb + (pl - from > 420 ? pl - 420 : from));
+			u64 from = pl > sizeof(s->log) - 1 ? pl - (sizeof(s->log) - 1) : 0;
+			memcpy(s->log, pb + from, (size_t)(pl - from));
+			s->log[pl - from] = 0;
+			n += snprintf(d + n, dn - n, "plugin.log %llu B, shown after these pages\n", (unsigned long long)pl);
 		}
 		free(pb);
 	}

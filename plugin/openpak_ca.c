@@ -33,6 +33,8 @@
  */
 
 #include "openpak_ca_patch.h"
+#include "openpak_names.h"
+#include "../app/source/vshnames.h"
 
 /* Two builds of this module differ only in the SELF wrapper (see plugin/Makefile) and in the names of
  * the files they report to, so a console shows which wrapper Cobra accepts. Both run the same code;
@@ -174,6 +176,66 @@ static long write_u32(u32 addr, u32 val)
 	return r;
 }
 
+static long mem_get(u32 addr, void *buf, long n)
+{
+	if (!g_vsh_pid) g_vsh_pid = find_vsh_pid();
+	if (!g_vsh_pid) return -1;
+	return sc8(8, 0x7777, 0x31, g_vsh_pid, (long)addr, (long)buf, n, 0, 0);     /* GET_PROC_MEM */
+}
+
+static long mem_set(u32 addr, const void *buf, long n)
+{
+	if (!g_vsh_pid) g_vsh_pid = find_vsh_pid();
+	if (!g_vsh_pid) return -1;
+	return sc8(8, 0x7777, 0x32, g_vsh_pid, (long)addr, (long)buf, n, 0, 0);     /* SET_PROC_MEM */
+}
+
+/* The PSN host names the sign-in code really uses are the copies inside the vsh image (32 known
+ * addresses on 4.93 CEX, app/source/vshnames.h). v0.2.14 on hardware: the memory walk below reported 11
+ * names rewritten, yet the console still asked DNS for *.playstation.net, and the 32 vsh copies were
+ * untouched. Those are rewritten here, through PS3MAPI like the pokes, with the same equal-length
+ * suffix swap: the whole name must be there, the write is read back. Returns how many are rewritten. */
+static int apply_names(void)
+{
+	unsigned int i, k, j;
+	int done = 0;
+
+	for (i = 0; i < sizeof(vsh_names) / sizeof(vsh_names[0]); i++) {
+		const char *nm = vsh_names[i].name;
+		unsigned char cur[40], want[40];
+		unsigned int len = 0;
+		int hit = -1;
+
+		while (nm[len]) len++;
+		if (len > sizeof(cur)) continue;
+		for (k = 0; k < OPENPAK_NAMES_N; k++) {
+			unsigned int same = openpak_names[k].len == len;
+			for (j = 0; same && j < len; j++) if (openpak_names[k].from[j] != nm[j]) same = 0;
+			if (same) { hit = (int)k; break; }
+		}
+		if (hit < 0) continue;
+		if (mem_get(vsh_names[i].addr, cur, (long)len) != 0) { tr("name read failed", vsh_names[i].addr); continue; }
+		{
+			unsigned int orig = 1, new_ = 1;
+			for (j = 0; j < len; j++) {
+				if (cur[j] != (unsigned char)openpak_names[hit].from[j]) orig = 0;
+				if (cur[j] != (unsigned char)openpak_names[hit].to[j]) new_ = 0;
+				want[j] = (unsigned char)openpak_names[hit].to[j];
+			}
+			if (new_) { done++; continue; }
+			if (!orig) { tr("name differs", vsh_names[i].addr); continue; }
+		}
+		if (mem_set(vsh_names[i].addr, want, (long)len) != 0) { tr("name write failed", vsh_names[i].addr); continue; }
+		if (mem_get(vsh_names[i].addr, cur, (long)len) == 0) {
+			unsigned int ok = 1;
+			for (j = 0; j < len; j++) if (cur[j] != want[j]) ok = 0;
+			if (ok) { done++; tr("name rewritten", vsh_names[i].addr); continue; }
+		}
+		tr("name verify failed", vsh_names[i].addr);
+	}
+	return done;
+}
+
 /* Boot status for the Patcher app: /dev_hdd0/openpak/plugin.status = "applied=A verified=V total=T".
  * Best effort; failure to write changes nothing about the pokes. */
 /* Poke counts kept for retries: [3] = 1 while plugin.status is not yet on disk. At boot the HDD
@@ -246,6 +308,9 @@ static void lv1_poke(u64 a, u64 v)
 #define RD_LV2PEEK(a)  ((u64)sc8(SC_PEEK_LV2, (long)(0x8000000000000000ULL | (u64)(a)), 0, 0, 0, 0, 0, 0, 0))
 #define RD_PAUSE()     usleep_(3000)
 #define RD_RUN()       (g_run)
+static volatile int g_hitlog __attribute__((section(".data.rel.ro"))) = 0;
+/* every memory-walk rewrite goes to plugin.log (first 24): index of the name and the low 32 bits of the real address */
+#define RD_HIT(a, k) do { if (g_hitlog < 24) { g_hitlog++; tr("rd hit", ((unsigned long long)(k) << 32) | ((a) & 0xffffffffULL)); } } while (0)
 #include "redirect.h"
 
 static int write_file(const char *path, const char *buf, int n)
@@ -438,7 +503,16 @@ int module_start(u64 args, const void *argp)
 	tr("module_start called, args", args);
 	apply_pokes();
 	tr("pokes done, applied", (unsigned long long)g_pk[0]);
-	if (g_pk[0] && g_pk[0] == g_pk[2]) sc4(392, 0x1004, 0x7, 0x36, 0);     /* second beep: every poke in place */
+	{
+		int nm = apply_names();
+		tr("vsh names rewritten", (unsigned long long)nm);
+		/* second beep once everything is in place; the buzzer ignores a request made while the first is still
+		 * sounding (v0.2.14: the two calls were a few ms apart), so wait for it */
+		if (g_pk[0] && g_pk[0] == g_pk[2] && nm > 0) {
+			usleep_(700000);
+			sc4(392, 0x1004, 0x7, 0x36, 0);
+		}
+	}
 	start_redirect();
 	tr("module_start returns", 0);
 	/* Stay resident so the pokes remain for the life of the vsh process. */

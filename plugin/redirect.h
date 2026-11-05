@@ -131,6 +131,9 @@ static void rd_patch(struct rd_state *st, unsigned long long a, int k)
 	}
 	st->nbk++;
 	st->hits[k]++;
+#ifdef RD_HIT
+	RD_HIT(a, k);
+#endif
 }
 
 static void rd_scan(struct rd_state *st, unsigned long long start, unsigned long long stop)

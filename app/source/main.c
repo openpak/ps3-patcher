@@ -186,10 +186,10 @@ static void build_status(const op_status *s, char *out, size_t n)
 	else snprintf(redir, sizeof(redir), "%s", s->redirect_state);
 
 	if (!s->vsh_found) snprintf(live, sizeof(live), "vsh not found");
-	else snprintf(live, sizeof(live), "pokes %d/%d, CN %s, names %d/%d",
+	else snprintf(live, sizeof(live), "pokes %d/%d, CN %s, names redirected %d, original %d, of %d",
 		      s->live_poke_patched, s->live_poke_total,
 		      s->live_cn_known ? (s->live_cn_patched ? "yes" : "no") : "?",
-		      s->live_names_rewritten, s->live_names_total);
+		      s->live_names_rewritten, s->live_names_orig, s->live_names_total);
 
 	snprintf(out, n,
 		 "OpenPak PS3 Patcher %s\n\n"
@@ -255,7 +255,10 @@ int main(int argc, char **argv)
 
 	/* Details page first: the full PS3MAPI line, every slot, boot_plugins.txt, the size check of each
 	 * wrapper and (after "Load it now") Cobra's raw answers. Also written to /dev_hdd0/openpak/diag.txt. */
-	if (s.installed || s.plugin_file) ask_pages(s.detail);
+	if (s.installed || s.plugin_file) {
+		ask_pages(s.detail);
+		if (s.log[0]) ask_pages(s.log);
+	}
 
 	/* Installed but older or different: offer the update first (same backup, verify and rename rules
 	 * as the first install), then fall through to "Switch back to PSN?" when declined. */

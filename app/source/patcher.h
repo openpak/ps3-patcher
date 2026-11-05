@@ -41,6 +41,7 @@ typedef struct {
 	int  pokes_applied, pokes_verified, pokes_total;
 	bool plugin_d_ran;    /* plugin.d.status written (signed wrapper) */
 	bool plugin_c_ran;    /* plugin.c.status written (third SELF wrapper) */
+	char log[4000];       /* the whole plugin.log (last 3.9 KB), shown page by page */
 	char detail[2300];    /* the details page: PS3MAPI, every slot, boot list, file checks, last load */
 	char ps3mapi_note[160];   /* raw PS3MAPI answers, for the status screen */
 	bool redirect_ran;    /* redirect.status written by this boot's plugin */

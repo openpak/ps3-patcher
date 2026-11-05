@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.2.15
+
+- v0.2.14 on hardware: the plugin runs (pokes 3/3, CN yes, redirect "11 names"), PSN sign-in fails with
+  80710A06 (`CELL_HTTPS_ERROR_HANDSHAKE`, RPCS3 `cellHttp.h`), and the box saw no connection from the
+  console. "names 0/32" was the signal: the 32 PSN name copies inside the vsh image, which the
+  sign-in code uses, were untouched. The memory walk (webMAN's LV1/LV2 ranges) rewrote other copies
+  and did not change what the console resolves. With the OpenPak CA replacing the trust roots and
+  the names unchanged, the console talks to the real PSN and fails the handshake.
+- The plugin now rewrites those 32 vsh copies (app/source/vshnames.h) with the same equal-length suffix
+  swap, through PS3MAPI GET/SET_PROC_MEM, verified by read-back, and logs each to plugin.log
+  (`name rewritten <addr>`, `vsh names rewritten N`). The memory walk logs its first 24 hits
+  (`rd hit <name index><address>`).
+- The second beep (every poke and at least one name in place) is now delayed 0.7 s: v0.2.14 issued it a
+  few ms after the first and the buzzer ignored it.
+- Details: the whole plugin.log is shown after the details pages (paged); the details header shows the
+  console clock in UTC (the OpenPak CA is valid from 2026-09-07, leaf certificates from an hour before
+  issue); the main page says `names redirected a, original b, of 32`.
+
 ## v0.2.14
 
 - v0.2.13 on hardware: all wrappers load into slots 1-3 and none runs: no beep, no plugin.log.
