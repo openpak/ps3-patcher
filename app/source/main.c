@@ -146,7 +146,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 	else if (s->pokes_applied == s->pokes_total) snprintf(plug, sizeof(plug), "ran, %d/%d patches", s->pokes_applied, s->pokes_total);
 	else snprintf(plug, sizeof(plug), "ran, only %d/%d patches", s->pokes_applied, s->pokes_total);
 
-	if (!s->plugins_known) snprintf(cobp, sizeof(cobp), "query failed");
+	if (!s->plugins_known) snprintf(cobp, sizeof(cobp), "query failed (see log)");
 	else if (s->plugin_loaded) snprintf(cobp, sizeof(cobp), "OpenPak loaded (slot %d)", s->plugin_slot);
 	else snprintf(cobp, sizeof(cobp), "OpenPak NOT loaded (%d others)", s->plugins_other);
 

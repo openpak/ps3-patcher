@@ -252,8 +252,8 @@ static void scan_thread(u64 arg)
 	} else {
 		for (i = 0; i < 5; i++) { flush_status(); usleep_(1000000); }
 		while (g_run) {
-			rd_pass(&st);
-			if (st.nbk != lastnbk || st.failed != lastfail || st.passes == 1) {
+					rd_pass(&st);
+					if (st.nbk != lastnbk || st.failed != lastfail || st.passes == 1) {
 				dirty = 1;
 				lastnbk = st.nbk;
 				lastfail = st.failed;

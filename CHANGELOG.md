@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.8 (unreleased)
+## v0.2.8
 
 - Update flow on launch: the app compares the installed setup with what it carries (version marker
   `/dev_hdd0/openpak/installed.txt`, plugin file byte for byte, CA files, boot_plugins line). If

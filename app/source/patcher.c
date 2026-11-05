@@ -341,6 +341,25 @@ static void detect_cfw(op_status *s)
  * GET_PROC_NAME_BY_PID 0x22, GET_PROC_MEM 0x31, GET_VSH_PLUGIN_INFO 0x47; load plugin is the Cobra
  * opcode 0x1EE7. Same calls as webMAN MOD's ps3mapi.h and cobra.c. */
 
+/* Read-only diagnostics: what PS3MAPI answers and in which syscall 8 mode (0x94 only reads it). The
+ * mode is logged, never changed: whether syscall 8 is restricted is a setting of the console's
+ * owner (webMAN MOD's setup), not something this app overrides. */
+static s32 ps3mapi_sc(u64 op, u64 a, u64 b, u64 c, u64 d)
+{
+	s32 r;
+	{ lv2syscall6(8, 0x7777, op, a, b, c, d); r = (s32)p1; }
+	return r;
+}
+
+static void ps3mapi_open(void)
+{
+	s32 core = ps3mapi_sc(0x11, 0, 0, 0, 0);       /* GET_CORE_VERSION */
+	s32 mode = ps3mapi_sc(0x94, 0, 0, 0, 0);       /* PCHECK_SYSCALL8 (read only) */
+	logf_("ps3mapi: core version ret=0x%08x, syscall 8 restriction mode=%d", (unsigned)core, (int)mode);
+}
+
+static void ps3mapi_close(void) {}
+
 static int ps3mapi_vsh_pid(void)
 {
 	static u32 pids[16];
@@ -348,11 +367,12 @@ static int ps3mapi_vsh_pid(void)
 	int i;
 
 	memset(pids, 0, sizeof(pids));
-	{ lv2syscall3(8, 0x7777, 0x21, (u64)(u32)(uintptr_t)pids); }
+	{ s32 r; lv2syscall3(8, 0x7777, 0x21, (u64)(u32)(uintptr_t)pids); r = (s32)p1; logf_("ps3mapi: GET_ALL_PROC_PID ret=0x%08x pids %u %u %u %u", (unsigned)r, pids[0], pids[1], pids[2], pids[3]); }
 	for (i = 0; i < 16; i++) {
 		if (pids[i] <= 1) continue;
 		memset(name, 0, sizeof(name));
 		{ lv2syscall4(8, 0x7777, 0x22, pids[i], (u64)(u32)(uintptr_t)name); }
+		logf_("ps3mapi: pid %u = '%s'", pids[i], name);
 		if (strstr(name, "_main_vsh.self")) return (int)pids[i];
 	}
 	return 0;
@@ -414,6 +434,7 @@ static int plugin_slot_info(int slot, char *name, int nl, char *file, int fl)
 	memset(name, 0, nl);
 	memset(file, 0, fl);
 	{ lv2syscall5(8, 0x7777, 0x47, (u64)slot, (u64)(u32)(uintptr_t)name, (u64)(u32)(uintptr_t)file); r = (s32)p1; }
+	logf_("ps3mapi: GET_VSH_PLUGIN_INFO slot %d ret=0x%08x name='%s' file='%s'", slot, (unsigned)r, name, file);
 	return r;
 }
 
@@ -441,17 +462,22 @@ bool op_load_plugin(int *ret, int *slot)
 
 	*ret = 0;
 	*slot = -1;
+	ps3mapi_open();
 	for (sl = 1; sl < 7 && use < 0; sl++) {
 		if (plugin_slot_info(sl, name, sizeof(name), file, sizeof(file)) != 0) continue;
-		if (strstr(file, "openpak_ca")) { *slot = sl; *ret = 0; logf_("load plugin: already in slot %d", sl); return true; }
+		if (strstr(file, "openpak_ca")) { *slot = sl; *ret = 0; logf_("load plugin: already in slot %d", sl); ps3mapi_close(); return true; }
 		if (!name[0] && !file[0]) use = sl;
 	}
-	if (use < 0) { logf_("load plugin: no free slot"); return false; }
+	if (use < 0) { logf_("load plugin: no free slot (or the plugin query failed)"); *ret = (int)0x80010000; ps3mapi_close(); return false; }
 	*slot = use;
 	{ lv2syscall5(8, 0x1EE7, (u64)use, (u64)(u32)(uintptr_t)OPENPAK_PLUGIN_DST, 0, 0); r = (s32)p1; }
 	*ret = r;
 	logf_("load plugin: slot %d path %s -> 0x%08x", use, OPENPAK_PLUGIN_DST, (unsigned)r);
-	return r == 0;
+	/* webMAN checks the slot afterwards: a loaded plugin has a file name there */
+	if (plugin_slot_info(use, name, sizeof(name), file, sizeof(file)) == 0 && file[0]) { ps3mapi_close(); return true; }
+	ps3mapi_close();
+	(void)r;
+	return false;
 }
 
 void op_status_read(op_status *s)
@@ -540,8 +566,10 @@ void op_status_read(op_status *s)
 	      s->installed, s->inst_ver, OPENPAK_VERSION, s->plugin_current, s->ca_openpak, s->plugin_listed, s->update_needed);
 
 	if (s->cobra) {
+		ps3mapi_open();
 		read_plugins(s);
 		read_vsh_live(s);
+		ps3mapi_close();
 	}
 
 	snprintf(path, sizeof(path), "%s/%s", OPENPAK_BACKUP_DIR, CA_NAMES[0]);
