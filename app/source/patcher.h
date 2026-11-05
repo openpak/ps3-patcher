@@ -17,6 +17,7 @@
 #define OPENPAK_STATUS_B   OPENPAK_DIR "/plugin.b.status"
 #define OPENPAK_STATUS_C   OPENPAK_DIR "/plugin.c.status"
 #define OPENPAK_STATUS_D   OPENPAK_DIR "/plugin.d.status"
+#define OPENPAK_PLUGIN_LOG OPENPAK_DIR "/plugin.log"   /* written by the plugin: step trace */
 #define OPENPAK_DIAG       OPENPAK_DIR "/diag.txt"
 #define OPENPAK_INSTALLED  OPENPAK_DIR "/installed.txt"
 #define OPENPAK_REDIRECT_STATUS OPENPAK_DIR "/redirect.status"
@@ -40,7 +41,7 @@ typedef struct {
 	int  pokes_applied, pokes_verified, pokes_total;
 	bool plugin_d_ran;    /* plugin.d.status written (signed wrapper) */
 	bool plugin_c_ran;    /* plugin.c.status written (third SELF wrapper) */
-	char detail[1500];    /* the details page: PS3MAPI, every slot, boot list, file checks, last load */
+	char detail[2300];    /* the details page: PS3MAPI, every slot, boot list, file checks, last load */
 	char ps3mapi_note[160];   /* raw PS3MAPI answers, for the status screen */
 	bool redirect_ran;    /* redirect.status written by this boot's plugin */
 	char redirect_state[16];  /* ok | hen | nolv2 | nothread | restored */

@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.2.13
+
+- v0.2.12 on hardware: Cobra loads the plugin at boot (slot 3, so all three wrappers A, C and D load:
+  a fself-wrapped real PRX is accepted, the ET_EXEC build was the only problem), but module_start
+  left no trace: no plugin.status, no pokes, no redirect.
+- The plugin now traces itself to `/dev_hdd0/openpak/plugin.log` (variant, counter, step, value) from
+  its first instruction, and gives one short beep on entry (sys_sm_ring_buzzer, as webMAN MOD) and a
+  second one when every poke is in place. The details page prints the log's last lines, or says that
+  module_start never wrote one. plugin.status ("ran") is written first, before anything that could
+  fault.
+- Pokes into vsh code now go through Cobra's PS3MAPI SET_PROC_MEM (pid of `_main_vsh.self`), not a
+  direct store from the plugin thread (vsh text is not guaranteed writable), and are verified by reading
+  back. The pids come from GET_ALL_PROC_PID / GET_PROC_NAME_BY_PID, as the app does.
+- Only wrapper A (fself over the real PRX) ships and is listed: it is what the official CI build can
+  produce without keys. C and D remain buildable by hand; an update removes their files and lines.
+- `tools/elf2prx.py` refuses a pc-relative relocation that crosses segments (segments are placed
+  independently by the loader).
+
 ## v0.2.12
 
 - v0.2.11 on hardware: the new files never reached the console (A still the 206088-byte ET_EXEC,

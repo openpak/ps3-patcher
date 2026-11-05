@@ -36,13 +36,13 @@ build/%.o: source/%.c source/patcher.h source/vshnames.h
 
 # stage the package payload
 stage-pkg: $(TARGET).elf
-	@test -f ../plugin/openpak_ca.sprx -a -f ../plugin/openpak_cc.sprx || { echo "build the plugin first (make -C ../plugin)"; exit 1; }
+	@test -f ../plugin/openpak_ca.sprx || { echo "build the plugin first (make -C ../plugin)"; exit 1; }
 	@test -f ../dist/dev_flash/data/cert/CA01.cer || { echo "run make stage first"; exit 1; }
 	rm -rf $(PKGFILES)
 	mkdir -p $(PKGFILES)/USRDIR/ca
 	cp ../dist/dev_flash/data/cert/CA01.cer ../dist/dev_flash/data/cert/CA59.cer $(PKGFILES)/USRDIR/ca/
-	cp ../plugin/openpak_ca.sprx ../plugin/openpak_cc.sprx $(PKGFILES)/USRDIR/
-	@if [ -f ../plugin/openpak_cd.sprx ]; then cp ../plugin/openpak_cd.sprx $(PKGFILES)/USRDIR/; echo "bundled the signed wrapper openpak_cd.sprx"; fi
+	cp ../plugin/openpak_ca.sprx $(PKGFILES)/USRDIR/
+	@for x in cc cd; do if [ -f ../plugin/openpak_$$x.sprx ]; then cp ../plugin/openpak_$$x.sprx $(PKGFILES)/USRDIR/; echo "bundled extra wrapper openpak_$$x.sprx"; fi; done
 
 pkg: stage-pkg $(TARGET).pkg
 	cp $(TARGET).pkg OpenPak-PS3-Patcher-v$(APP_VERSION).pkg

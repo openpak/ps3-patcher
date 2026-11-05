@@ -34,7 +34,10 @@ ifdef SCETOOL
 SIGNED := $(TARGET_D).sprx
 endif
 
-all: $(TARGET).sprx $(TARGET_C).sprx $(SIGNED)
+# Default build: wrapper A only (what CI builds). openpak_cc.sprx / openpak_cd.sprx are experiments:
+#   make openpak_cc.sprx            fself with webMAN's application info
+#   make SCETOOL=... SCE_DATA=...   adds the scetool-signed openpak_cd.sprx
+all: $(TARGET).sprx $(SIGNED)
 
 # The module is linked with prx.ld (a PRX layout at vaddr 0), converted by ../tools/elf2prx.py into an
 # ET_SCE_PPURELEXEC file with a relocation segment, then wrapped as a fake SELF by PSL1GHT's fself.

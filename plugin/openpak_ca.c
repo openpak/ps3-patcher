@@ -64,14 +64,6 @@
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
-/* vsh text is mapped executable+writable in the vsh process under Cobra, so a direct store
- * reaches it; we still flush the instruction cache for the lines we touch. */
-static void write_u32(u32 addr, u32 val)
-{
-	*(volatile u32 *)(u64)addr = val;
-	__asm__ volatile("dcbst 0,%0; sync; icbi 0,%0; isync" : : "r"((u64)addr) : "memory");
-}
-
 static u32 read_u32(u32 addr)
 {
 	return *(volatile u32 *)(u64)addr;
@@ -112,6 +104,74 @@ static long sc8(long n, long a, long b, long c, long d, long e, long f, long g, 
 			 :
 			 : "r0", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6", "cr7", "memory");
 	return r3;
+}
+
+/* ---- step trace -------------------------------------------------------------------------------
+ * /dev_hdd0/openpak/plugin.log gets one line per step ("<variant> <n> <text> <hex>") so the app (and a
+ * photo of its details page) shows how far module_start and the scan thread got. Each line is its own
+ * open/append/close, best effort: at early boot /dev_hdd0 may not be mounted yet, then the line is lost
+ * (the scan thread logs again once the disk is there). */
+static volatile int g_tr_n __attribute__((section(".data.rel.ro"))) = 0;
+
+static void tr(const char *what, unsigned long long v)
+{
+	char b[96];
+	int n = 0, k, fd = -1;
+	unsigned long long wrote = 0;
+	static const char hex[] = "0123456789abcdef";
+
+	b[n++] = (char)('0' + OPENPAK_VARIANT);
+	b[n++] = ' ';
+	{ int c = ++g_tr_n; b[n++] = (char)('0' + (c / 10) % 10); b[n++] = (char)('0' + c % 10); }
+	b[n++] = ' ';
+	for (k = 0; what[k] && n < 70; k++) b[n++] = what[k];
+	b[n++] = ' ';
+	for (k = 15; k >= 0; k--) b[n++] = hex[(v >> (k * 4)) & 15];
+	b[n++] = '\n';
+	/* sys_fs_open(path, O_WRONLY|O_CREAT|O_APPEND, &fd, 0666): 0x1 | 0x40 | 0x400 */
+	if (sc4(801, (long)"/dev_hdd0/openpak/plugin.log", 0x441, (long)&fd, 0666) != 0) {
+		sc4(811, (long)"/dev_hdd0/openpak", 0777, 0, 0);
+		if (sc4(801, (long)"/dev_hdd0/openpak/plugin.log", 0x441, (long)&fd, 0666) != 0) return;
+	}
+	sc4(803, fd, (long)b, n, (long)&wrote);
+	sc4(804, fd, 0, 0, 0);
+}
+
+/* The pokes go into the vsh process's code. A direct store from the plugin thread is not safe: vsh
+ * text is not guaranteed writable (v0.2.12 on hardware: plugin resident, nothing patched, no file
+ * written). Cobra's PS3MAPI SET_PROC_MEM (syscall 8, 0x7777, 0x32: pid, address, buffer, size) writes it
+ * from the kernel, which is what webMAN MOD does. */
+static int g_vsh_pid __attribute__((section(".data.rel.ro"))) = 0;
+
+static int find_vsh_pid(void)
+{
+	unsigned int pids[16];
+	char name[40];
+	int i, k;
+
+	for (i = 0; i < 16; i++) pids[i] = 0;
+	sc4(8, 0x7777, 0x21, (long)pids, 0);                      /* GET_ALL_PROC_PID */
+	for (i = 0; i < 16; i++) {
+		if (pids[i] <= 1) continue;
+		for (k = 0; k < 40; k++) name[k] = 0;
+		sc4(8, 0x7777, 0x22, (long)pids[i], (long)name);   /* GET_PROC_NAME_BY_PID */
+		for (k = 0; name[k]; k++)
+			if (name[k] == '_' && name[k + 1] == 'm' && name[k + 2] == 'a' && name[k + 3] == 'i' &&
+			    name[k + 4] == 'n' && name[k + 5] == '_' && name[k + 6] == 'v' && name[k + 7] == 's' &&
+			    name[k + 8] == 'h')
+				return (int)pids[i];
+	}
+	return 0;
+}
+
+static long write_u32(u32 addr, u32 val)
+{
+	u32 buf = val;
+	long r;
+	if (!g_vsh_pid) g_vsh_pid = find_vsh_pid();
+	if (!g_vsh_pid) return -1;
+	r = sc8(8, 0x7777, 0x32, g_vsh_pid, (long)addr, (long)&buf, 4, 0, 0);   /* SET_PROC_MEM */
+	return r;
 }
 
 /* Boot status for the Patcher app: /dev_hdd0/openpak/plugin.status = "applied=A verified=V total=T".
@@ -258,11 +318,13 @@ static void scan_thread(u64 arg)
 	int lastnbk = -1, lastfail = -1, i, dirty = 0;
 	(void)arg;
 
+	tr("scan thread entered", 0);
 	rd_init(&st);
 	for (g_via = 0; g_via < 2; g_via++) {
 		st.lv2off = rd_find_lv2off();
 		if (st.lv2off) break;
 	}
+	tr("lv2off", st.lv2off);
 	if (!st.lv2off) {
 		for (i = 0; i < 120 && g_run; i++) {
 			flush_status();
@@ -317,8 +379,12 @@ static void start_redirect(void)
 		write_redirect_status("hen", NULL);
 		return;
 	}
-	if (start_scan_thread() != 0)
+	if (start_scan_thread() != 0) {
+		tr("thread create failed", 0);
 		write_redirect_status("nothread", NULL);
+	} else {
+		tr("thread started", 0);
+	}
 }
 
 static void apply_pokes(void)
@@ -326,12 +392,18 @@ static void apply_pokes(void)
 	unsigned int i;
 	int applied = 0, verified = 0, total = 0;
 
+	/* "ran" marker first, before anything that could fault: applied=0 until the pokes are done */
+	write_status(0, 0, (int)(sizeof(openpak_u32_pokes) / sizeof(openpak_u32_pokes[0])) + 1);
+	tr("vsh pid", (unsigned long long)(g_vsh_pid = find_vsh_pid()));
 	for (i = 0; i < sizeof(openpak_u32_pokes) / sizeof(openpak_u32_pokes[0]); i++) {
 		total++;
+		tr("poke word", read_u32(openpak_u32_pokes[i].addr));
 		if (read_u32(openpak_u32_pokes[i].addr) == openpak_u32_pokes[i].orig) {
+			long wr;
 			verified++;
-			write_u32(openpak_u32_pokes[i].addr, openpak_u32_pokes[i].val);
-			applied++;
+			wr = write_u32(openpak_u32_pokes[i].addr, openpak_u32_pokes[i].val);
+			tr("poke write ret", (unsigned long long)wr);
+			if (read_u32(openpak_u32_pokes[i].addr) == openpak_u32_pokes[i].val) applied++;
 		} else if (read_u32(openpak_u32_pokes[i].addr) == openpak_u32_pokes[i].val) {
 			verified++;       /* the other build of this plugin got there first */
 			applied++;
@@ -345,7 +417,7 @@ static void apply_pokes(void)
 		verified++;
 		for (i = 0; i < 6; i++)
 			write_u32(OPENPAK_CN_STRING_ADDR + i * 4, openpak_cn_words[i]);
-		applied++;
+		if (read_u32(OPENPAK_CN_STRING_ADDR) == openpak_cn_words[0]) applied++;
 	} else if (read_u32(OPENPAK_CN_STRING_ADDR) == openpak_cn_words[0]) {
 		verified++;
 		applied++;
@@ -358,10 +430,16 @@ static void apply_pokes(void)
 /* PRX module entry points, exported by NID from module.S. */
 int module_start(u64 args, const void *argp)
 {
-	(void)args;
 	(void)argp;
+	/* first thing: one short beep (sys_sm_ring_buzzer, as webMAN MOD's BEEP1) and a log line, so a restart
+	 * shows whether the start entry runs at all */
+	sc4(392, 0x1004, 0x4, 0x6, 0);
+	tr("module_start called, args", args);
 	apply_pokes();
+	tr("pokes done, applied", (unsigned long long)g_pk[0]);
+	if (g_pk[0] && g_pk[0] == g_pk[2]) sc4(392, 0x1004, 0x7, 0x36, 0);     /* second beep: every poke in place */
 	start_redirect();
+	tr("module_start returns", 0);
 	/* Stay resident so the pokes remain for the life of the vsh process. */
 	return SYS_PRX_RESIDENT;
 }

@@ -126,6 +126,25 @@ def main(src, dst):
             elif rtype == R_TOC:
                 relocs.append((ls, lo, 1, R_ADDR64, toc - segs[1]["va"]))
             elif rtype in SKIP:
+                if rtype in (10, 11, 26, 44):
+                    # pc-relative: the branch/word must land in the segment it sits in (segments move
+                    # independently). The target is read from the linked instruction/word, since REL24
+                    # relocations name .opd entries while the linker has already pointed them at code.
+                    word = int.from_bytes(imgs[ls][lo:lo + 4], "big")
+                    if rtype == 10:
+                        off = word & 0x03FFFFFC
+                        off = off - (1 << 26) if off & (1 << 25) else off
+                        tgt = roff + off
+                    elif rtype == 11:
+                        off = word & 0xFFFC
+                        off = off - (1 << 16) if off & (1 << 15) else off
+                        tgt = roff + off
+                    elif rtype == 26:
+                        tgt = roff + (word - (1 << 32) if word & 0x80000000 else word)
+                    else:
+                        tgt = None
+                    if tgt is not None and segof(tgt, True) != ls:
+                        sys.exit("pc-relative reloc type %d at %#x targets %#x in another segment (%s)" % (rtype, roff, tgt, rs["nm"]))
                 # position independent only while source and target stay in one segment (calls) or the
                 # TOC entry is in the data segment
                 if rtype in (47, 48, 49, 50, 63, 64):
