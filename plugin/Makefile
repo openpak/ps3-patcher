@@ -6,85 +6,69 @@
 #   (here)                make              # -> openpak_ca.sprx
 #
 # openpak_ca.c holds module_start/module_stop; module.S holds the PRX export table (module_start
-# NID 0xBC9A0086, module_stop 0xAB779874, module_info 0xD7F43016) with no imported libraries. The
-# module links against PSL1GHT's lv2.ld + lv2-sprx.o (which supplies .sys_proc_prx_param);
-# sprxlinker turns it into a PRX and fself fake-signs it as the VSH-plugin sprx Cobra loads.
+# NID 0xBC9A0086, module_stop 0xAB779874, module_info 0xD7F43016) with no imported libraries. It is
+# linked with prx.ld, converted to a real PRX (ET_SCE_PPURELEXEC) by tools/elf2prx.py and wrapped by
+# fself as the VSH-plugin sprx Cobra loads.
 
 ifndef PS3DEV
 $(error PS3DEV is not set -- install ps3toolchain/PSL1GHT first)
 endif
 
 CC      := ppu-gcc
-SPRX    := sprxlinker
 FSELF   := fself
-
-LIBDIR  := $(PS3DEV)/ppu/powerpc64-ps3-elf/lib
-LDSCRIPT:= $(LIBDIR)/lv2.ld
-SPRXCRT := $(LIBDIR)/lv2-sprx.o
+PYTHON  := python3
 
 TARGET  := openpak_ca
-TARGET_B:= openpak_cb
 TARGET_C:= openpak_cc
-MAKESELF:= make_self
 GEN     := openpak_ca_patch.h
 
-CFLAGS  := -O2 -Wall -fpic -ffreestanding -ffunction-sections
-LDFLAGS := -nostartfiles -fpic -Wl,-q -T $(LDSCRIPT)
+CFLAGS  := -O2 -Wall -fpic -ffreestanding -ffunction-sections -fno-asynchronous-unwind-tables -fno-unwind-tables
+LDFLAGS := -nostartfiles -nostdlib -fpic -Wl,-q -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -T prx.ld
 
-all: $(TARGET).sprx $(TARGET_B).sprx $(TARGET_C).sprx
+all: $(TARGET).sprx $(TARGET_C).sprx
 
-# Two SELF wrappers of the same module, because it is not known which one Cobra's VSH plugin loader
-# accepts: openpak_ca.sprx via PSL1GHT's fself (key revision 0x8000), openpak_cb.sprx via the
-# toolchain's make_self. Both are installed and listed in boot_plugins.txt; the app shows which ran.
+# The module is linked with prx.ld (a PRX layout at vaddr 0), converted by ../tools/elf2prx.py into an
+# ET_SCE_PPURELEXEC file with a relocation segment, then wrapped as a fake SELF by PSL1GHT's fself.
+# The earlier builds linked an ET_EXEC with PSL1GHT's lv2.ld and sprxlinker; Cobra's kernel module
+# loader refuses that with 0x80011148 (CELL_PRX_ERROR_UNSUPPORTED_PRX_TYPE).
+#
+# Two wrappers of the same module are installed: openpak_ca.sprx with fself's default application
+# info, openpak_cc.sprx with the application info of webMAN MOD's own sprx (scetool -3
+# 1070000052000001 -6 0003004000000000; fself default: auth id 1010000001000003, version
+# 0001000000000000), at file offset 0x70 (auth id) and 0x80 (version). Octal escapes: dash.
 $(GEN):
 	@echo "run 'make stage' from the repo root first to generate $(GEN)"; exit 1
 
 $(TARGET).o: $(TARGET).c $(GEN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TARGET_B).o: $(TARGET).c $(GEN)
-	$(CC) $(CFLAGS) -DOPENPAK_VARIANT=2 -c $< -o $@
-
 $(TARGET_C).o: $(TARGET).c $(GEN)
 	$(CC) $(CFLAGS) -DOPENPAK_VARIANT=3 -c $< -o $@
-
-module_c.o: module.S
-	$(CC) -DMODNAME='"openpak_cc"' -c $< -o $@
 
 module.o: module.S
 	$(CC) -c $< -o $@
 
-module_b.o: module.S
-	$(CC) -DMODNAME='"openpak_cb"' -c $< -o $@
+module_c.o: module.S
+	$(CC) -DMODNAME='"openpak_cc"' -c $< -o $@
 
-$(TARGET).elf: $(TARGET).o module.o
-	$(CC) $(LDFLAGS) $(TARGET).o module.o $(SPRXCRT) -o $@
+$(TARGET).elf: $(TARGET).o module.o prx.ld
+	$(CC) $(LDFLAGS) $(TARGET).o module.o -o $@
 
-$(TARGET_B).elf: $(TARGET_B).o module_b.o
-	$(CC) $(LDFLAGS) $(TARGET_B).o module_b.o $(SPRXCRT) -o $@
+$(TARGET_C).elf: $(TARGET_C).o module_c.o prx.ld
+	$(CC) $(LDFLAGS) $(TARGET_C).o module_c.o -o $@
 
-$(TARGET_C).elf: $(TARGET_C).o module_c.o
-	$(CC) $(LDFLAGS) $(TARGET_C).o module_c.o $(SPRXCRT) -o $@
+%.prx: %.elf ../tools/elf2prx.py
+	$(PYTHON) ../tools/elf2prx.py $< $@
 
-# Third wrapper: the same fself, with the SELF application info set to what webMAN MOD's own sprx
-# carries (scetool -3 1070000052000001 -6 0003004000000000; the fself default is auth id
-# 1010000001000003, version 0001000000000000). appinfo sits at file offset 0x70 (auth id) and 0x80
-# (version). Octal escapes, because the build shell may be dash.
-$(TARGET_C).sprx: $(TARGET_C).elf
-	$(SPRX) $(TARGET_C).elf
-	$(FSELF) $(TARGET_C).elf $@
+$(TARGET).sprx: $(TARGET).prx
+	$(FSELF) $< $@
+
+$(TARGET_C).sprx: $(TARGET_C).prx
+	$(FSELF) $< $@
 	printf '\020\160\000\000\122\000\000\001' | dd of=$@ bs=1 seek=112 conv=notrunc 2>/dev/null
 	printf '\000\003\000\100\000\000\000\000' | dd of=$@ bs=1 seek=128 conv=notrunc 2>/dev/null
 
-$(TARGET).sprx: $(TARGET).elf
-	$(SPRX) $(TARGET).elf
-	$(FSELF) $(TARGET).elf $@
-
-$(TARGET_B).sprx: $(TARGET_B).elf
-	$(SPRX) $(TARGET_B).elf
-	$(MAKESELF) $(TARGET_B).elf $@
-
 clean:
-	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).sprx $(TARGET_B).o module_b.o $(TARGET_B).elf $(TARGET_B).sprx $(TARGET_C).o module_c.o $(TARGET_C).elf $(TARGET_C).sprx
+	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).prx $(TARGET).sprx $(TARGET_C).o module_c.o $(TARGET_C).elf $(TARGET_C).prx $(TARGET_C).sprx openpak_cb.*
 
 .PHONY: all clean

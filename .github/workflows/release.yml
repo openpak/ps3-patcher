@@ -47,7 +47,7 @@ jobs:
       - name: bundle
         run: |
           mkdir -p out/dev_flash/data/cert
-          cp plugin/openpak_ca.sprx plugin/openpak_cb.sprx out/
+          cp plugin/openpak_ca.sprx plugin/openpak_cc.sprx out/
           cp dist/dev_flash/data/cert/CA01.cer dist/dev_flash/data/cert/CA59.cer out/dev_flash/data/cert/
           cp dist/poke-table.txt dist/redirect-names.txt out/
           cp docs/deploy.md out/INSTALL.md

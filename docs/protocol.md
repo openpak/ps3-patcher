@@ -71,5 +71,7 @@ restoring the `.orig` certs. `openpak_ca_patch.h` (generated) carries the poke v
 verify-before-patch originals; `openpak_ca.c` applies them in `module_start`. `module.S` carries
 the PRX export table — module_start (NID `0xBC9A0086`), module_stop (`0xAB779874`) and module_info
 (`0xD7F43016`), no imported libraries — modelled byte-for-byte on a real firmware VSH plugin, so
-`sprxlinker` + `fself` produce the sprx Cobra loads. The plugin build is verified to produce a
-well-formed SCE fake-self; loading and running it on real hardware is not yet verified.
+`plugin/prx.ld` + `tools/elf2prx.py` produce a real PRX (`ET_SCE_PPURELEXEC`, relocation segment, as the
+firmware's own plugins) and `fself` wraps it as the sprx Cobra loads. Cobra's kernel loader refused the
+earlier `ET_EXEC` build (`sprxlinker`) with 0x80011148, `CELL_PRX_ERROR_UNSUPPORTED_PRX_TYPE`. Whether
+the new file loads on real hardware is not yet verified.

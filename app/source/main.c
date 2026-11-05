@@ -162,11 +162,11 @@ static void build_status(const op_status *s, char *out, size_t n)
 	char plug[64], redir[96], live[160], cobp[64];
 
 	if (!s->plugin_listed) snprintf(plug, sizeof(plug), "not installed");
-	else if (!s->plugin_ran && !s->plugin_b_ran && !s->plugin_c_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
+	else if (!s->plugin_ran && !s->plugin_c_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
 	else {
-		int a = s->plugin_ran ? s->pokes_applied : s->pokes_b_applied;
-		int t = s->plugin_ran ? s->pokes_total : s->pokes_b_total;
-		snprintf(plug, sizeof(plug), "loaded %d/%d (%s%s%s)", a, t, s->plugin_ran ? "A" : "", s->plugin_c_ran ? "C" : "", s->plugin_b_ran ? "B" : "");
+		int a = s->pokes_applied;
+		int t = s->pokes_total;
+		snprintf(plug, sizeof(plug), "loaded %d/%d (%s%s)", a, t, s->plugin_ran ? "A" : "", s->plugin_c_ran ? "C" : "");
 	}
 
 	if (!s->plugins_known) snprintf(cobp, sizeof(cobp), "no answer from PS3MAPI");

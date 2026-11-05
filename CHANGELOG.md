@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.11
+
+- v0.2.10 on hardware: Cobra's load call now reaches the kernel module loader, which answers
+  0x80011148 = CELL_PRX_ERROR_UNSUPPORTED_PRX_TYPE (RPCS3 `sys_prx.h`; its loader raises it when the
+  file does not decrypt or is not an `ET_SCE_PPURELEXEC` ELF). Cause: our sprx was an `ET_EXEC` image
+  linked at fixed addresses 0x10000/0x10000000 by PSL1GHT's `lv2.ld` + `sprxlinker`. A firmware PRX
+  (checked against `ap_plugin.prx`) is `e_type` 0xFFA4, OSABI 0x66, two load segments at vaddr 0, and
+  a `PT_SCE_PPURELA` (0x700000a4) segment of 24-byte relocation records; the module info is found
+  through `p_paddr` of the first segment.
+- The plugin is now linked with `plugin/prx.ld` (PRX layout at vaddr 0, no PSL1GHT stub objects), converted by
+  `tools/elf2prx.py` into that layout (77 relocations: ADDR32/ADDR64 and the TOC base; module info
+  `toc` relocated), then wrapped by `fself`. The conversion is checked by loading the result the way
+  RPCS3's `ppu_load_prx` does (relocate, read the module info and export table, follow the OPDs).
+- `openpak_cb.sprx` (compressed `make_self`, can never pass Cobra's size guard) is gone; an update
+  removes its file, its boot_plugins line and its status file. Other lines are kept as they were.
+  Wrappers: A (fself) and C (fself with webMAN's application info).
+
 ## v0.2.10
 
 - Cause found for "Cobra plugins: query failed" and "Cobra load call ... 0x80010000": both were this

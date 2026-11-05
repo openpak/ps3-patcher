@@ -9,7 +9,7 @@
 #define OPENPAK_BACKUP_DIR OPENPAK_DIR "/backup"
 #define OPENPAK_LOG        OPENPAK_DIR "/patcher.log"
 #define OPENPAK_PLUGIN_DST "/dev_hdd0/plugins/openpak_ca.sprx"
-#define OPENPAK_PLUGIN_DST_B "/dev_hdd0/plugins/openpak_cb.sprx"   /* second SELF wrapper of the same plugin */
+#define OPENPAK_PLUGIN_DST_B "/dev_hdd0/plugins/openpak_cb.sprx"   /* legacy (v0.2.9, v0.2.10): removed on update */
 #define OPENPAK_PLUGIN_DST_C "/dev_hdd0/plugins/openpak_cc.sprx"   /* third wrapper: fself with webMAN's app info */
 #define OPENPAK_BOOT_LIST  "/dev_hdd0/boot_plugins.txt"
 #define OPENPAK_STATUS     OPENPAK_DIR "/plugin.status"
@@ -36,8 +36,6 @@ typedef struct {
 	bool plugin_file;     /* sprx present in /dev_hdd0/plugins */
 	bool plugin_ran;      /* plugin.status written by this boot's plugin */
 	int  pokes_applied, pokes_verified, pokes_total;
-	bool plugin_b_ran;    /* plugin.b.status written (second SELF wrapper) */
-	int  pokes_b_applied, pokes_b_total;
 	bool plugin_c_ran;    /* plugin.c.status written (third SELF wrapper) */
 	char detail[1500];    /* the details page: PS3MAPI, every slot, boot list, file checks, last load */
 	char ps3mapi_note[160];   /* raw PS3MAPI answers, for the status screen */
