@@ -24,13 +24,14 @@ SPRXCRT := $(LIBDIR)/lv2-sprx.o
 
 TARGET  := openpak_ca
 TARGET_B:= openpak_cb
+TARGET_C:= openpak_cc
 MAKESELF:= make_self
 GEN     := openpak_ca_patch.h
 
 CFLAGS  := -O2 -Wall -fpic -ffreestanding -ffunction-sections
 LDFLAGS := -nostartfiles -fpic -Wl,-q -T $(LDSCRIPT)
 
-all: $(TARGET).sprx $(TARGET_B).sprx
+all: $(TARGET).sprx $(TARGET_B).sprx $(TARGET_C).sprx
 
 # Two SELF wrappers of the same module, because it is not known which one Cobra's VSH plugin loader
 # accepts: openpak_ca.sprx via PSL1GHT's fself (key revision 0x8000), openpak_cb.sprx via the
@@ -44,6 +45,12 @@ $(TARGET).o: $(TARGET).c $(GEN)
 $(TARGET_B).o: $(TARGET).c $(GEN)
 	$(CC) $(CFLAGS) -DOPENPAK_VARIANT=2 -c $< -o $@
 
+$(TARGET_C).o: $(TARGET).c $(GEN)
+	$(CC) $(CFLAGS) -DOPENPAK_VARIANT=3 -c $< -o $@
+
+module_c.o: module.S
+	$(CC) -DMODNAME='"openpak_cc"' -c $< -o $@
+
 module.o: module.S
 	$(CC) -c $< -o $@
 
@@ -56,6 +63,19 @@ $(TARGET).elf: $(TARGET).o module.o
 $(TARGET_B).elf: $(TARGET_B).o module_b.o
 	$(CC) $(LDFLAGS) $(TARGET_B).o module_b.o $(SPRXCRT) -o $@
 
+$(TARGET_C).elf: $(TARGET_C).o module_c.o
+	$(CC) $(LDFLAGS) $(TARGET_C).o module_c.o $(SPRXCRT) -o $@
+
+# Third wrapper: the same fself, with the SELF application info set to what webMAN MOD's own sprx
+# carries (scetool -3 1070000052000001 -6 0003004000000000; the fself default is auth id
+# 1010000001000003, version 0001000000000000). appinfo sits at file offset 0x70 (auth id) and 0x80
+# (version). Octal escapes, because the build shell may be dash.
+$(TARGET_C).sprx: $(TARGET_C).elf
+	$(SPRX) $(TARGET_C).elf
+	$(FSELF) $(TARGET_C).elf $@
+	printf '\020\160\000\000\122\000\000\001' | dd of=$@ bs=1 seek=112 conv=notrunc 2>/dev/null
+	printf '\000\003\000\100\000\000\000\000' | dd of=$@ bs=1 seek=128 conv=notrunc 2>/dev/null
+
 $(TARGET).sprx: $(TARGET).elf
 	$(SPRX) $(TARGET).elf
 	$(FSELF) $(TARGET).elf $@
@@ -65,6 +85,6 @@ $(TARGET_B).sprx: $(TARGET_B).elf
 	$(MAKESELF) $(TARGET_B).elf $@
 
 clean:
-	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).sprx $(TARGET_B).o module_b.o $(TARGET_B).elf $(TARGET_B).sprx
+	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).sprx $(TARGET_B).o module_b.o $(TARGET_B).elf $(TARGET_B).sprx $(TARGET_C).o module_c.o $(TARGET_C).elf $(TARGET_C).sprx
 
 .PHONY: all clean

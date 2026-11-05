@@ -10,9 +10,12 @@
 #define OPENPAK_LOG        OPENPAK_DIR "/patcher.log"
 #define OPENPAK_PLUGIN_DST "/dev_hdd0/plugins/openpak_ca.sprx"
 #define OPENPAK_PLUGIN_DST_B "/dev_hdd0/plugins/openpak_cb.sprx"   /* second SELF wrapper of the same plugin */
+#define OPENPAK_PLUGIN_DST_C "/dev_hdd0/plugins/openpak_cc.sprx"   /* third wrapper: fself with webMAN's app info */
 #define OPENPAK_BOOT_LIST  "/dev_hdd0/boot_plugins.txt"
 #define OPENPAK_STATUS     OPENPAK_DIR "/plugin.status"
 #define OPENPAK_STATUS_B   OPENPAK_DIR "/plugin.b.status"
+#define OPENPAK_STATUS_C   OPENPAK_DIR "/plugin.c.status"
+#define OPENPAK_DIAG       OPENPAK_DIR "/diag.txt"
 #define OPENPAK_INSTALLED  OPENPAK_DIR "/installed.txt"
 #define OPENPAK_REDIRECT_STATUS OPENPAK_DIR "/redirect.status"
 
@@ -35,6 +38,8 @@ typedef struct {
 	int  pokes_applied, pokes_verified, pokes_total;
 	bool plugin_b_ran;    /* plugin.b.status written (second SELF wrapper) */
 	int  pokes_b_applied, pokes_b_total;
+	bool plugin_c_ran;    /* plugin.c.status written (third SELF wrapper) */
+	char detail[1500];    /* the details page: PS3MAPI, every slot, boot list, file checks, last load */
 	char ps3mapi_note[160];   /* raw PS3MAPI answers, for the status screen */
 	bool redirect_ran;    /* redirect.status written by this boot's plugin */
 	char redirect_state[16];  /* ok | hen | nolv2 | nothread | restored */
@@ -68,6 +73,8 @@ bool op_switch_psn(char *err, int err_len);
 /* Load the plugin into a free Cobra VSH plugin slot now (Cobra syscall 8 opcode 0x1EE7). ret is the
  * raw return value, slot the slot used (-1 when none was free). */
 bool op_load_plugin(int *ret, int *slot);
+/* Text of the last op_load_plugin: one line per wrapper tried, with the raw Cobra return code. */
+const char *op_load_report(void);
 
 void op_reboot(void);
 

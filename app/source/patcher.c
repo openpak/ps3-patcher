@@ -174,7 +174,7 @@ static bool is_line(const unsigned char *p, size_t n, const char *path)
 
 static bool is_our_line(const unsigned char *p, size_t n)
 {
-	return is_line(p, n, OPENPAK_PLUGIN_DST) || is_line(p, n, OPENPAK_PLUGIN_DST_B);
+	return is_line(p, n, OPENPAK_PLUGIN_DST) || is_line(p, n, OPENPAK_PLUGIN_DST_B) || is_line(p, n, OPENPAK_PLUGIN_DST_C);
 }
 
 static bool list_has_path(const unsigned char *buf, u64 len, const char *path)
@@ -191,7 +191,7 @@ static bool list_has_path(const unsigned char *buf, u64 len, const char *path)
 
 static bool list_has_ours(const unsigned char *buf, u64 len)
 {
-	return list_has_path(buf, len, OPENPAK_PLUGIN_DST) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_B);
+	return list_has_path(buf, len, OPENPAK_PLUGIN_DST) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_B) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_C);
 }
 
 static bool boot_list_add(void)
@@ -199,17 +199,17 @@ static bool boot_list_add(void)
 	u64 len = 0;
 	unsigned char *buf = NULL, *out;
 	bool ok;
-	const char *paths[2] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_B };
+	const char *paths[3] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_C, OPENPAK_PLUGIN_DST_B };
 	int k;
 
 	if (exists(OPENPAK_BOOT_LIST)) {
 		buf = read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len);
 		if (!buf) return false;
 	}
-	out = malloc(len + strlen(paths[0]) + strlen(paths[1]) + 8);
+	out = malloc(len + strlen(paths[0]) + strlen(paths[1]) + strlen(paths[2]) + 8);
 	if (!out) { free(buf); return false; }
 	if (len) memcpy(out, buf, len);
-	for (k = 0; k < 2; k++) {
+	for (k = 0; k < 3; k++) {
 		if (buf && list_has_path(buf, len, paths[k])) continue;
 		if (len && out[len - 1] != '\n') out[len++] = '\n';
 		memcpy(out + len, paths[k], strlen(paths[k]));
@@ -456,7 +456,17 @@ static void read_vsh_live(op_status *s)
 	      s->live_names_total);
 }
 
-/* Query the 7 Cobra VSH plugin slots. A slot with an empty name and file name is free. */
+/* Query the 7 Cobra VSH plugin slots. Cobra's ps3mapi_get_vsh_plugin_info() returns ENOENT
+ * (0x80010006) for a slot with nothing loaded (stage2/modulespatch.c: "if (vsh_plugins[slot] == 0)
+ * return ENOENT"), so ENOENT means "free", not "the query failed". webMAN MOD ignores the return
+ * value and tests the cleared name buffer for the same reason. */
+#define OP_ENOENT 0x80010006u
+
+static char g_slot_line[200];       /* "0:- 1:- 2:WWWD ..." for the details page */
+static char g_load_report[400];
+
+const char *op_load_report(void) { return g_load_report; }
+
 static int plugin_slot_info(int slot, char *name, int nl, char *file, int fl)
 {
 	s32 r;
@@ -464,19 +474,34 @@ static int plugin_slot_info(int slot, char *name, int nl, char *file, int fl)
 	memset(file, 0, fl);
 	{ lv2syscall5(8, 0x7777, 0x47, (u64)slot, (u64)(u32)(uintptr_t)name, (u64)(u32)(uintptr_t)file); r = (s32)p1; }
 	logf_("ps3mapi: GET_VSH_PLUGIN_INFO slot %d ret=0x%08x name='%s' file='%s'", slot, (unsigned)r, name, file);
-	if (slot <= 1) note_add(", slot%d %08x", slot, (unsigned)r);
 	return r;
+}
+
+static bool slot_empty(int r) { return (unsigned)r == OP_ENOENT; }
+static bool slot_answered(int r) { return r == 0 || slot_empty(r); }
+
+static const char *base_name(const char *p)
+{
+	const char *q = strrchr(p, '/');
+	return q ? q + 1 : p;
 }
 
 static void read_plugins(op_status *s)
 {
 	static char name[48], file[256];
 	int slot;
+	size_t n = 0;
 
 	s->plugin_slot = -1;
+	g_slot_line[0] = 0;
 	for (slot = 0; slot < 7; slot++) {
 		int r = plugin_slot_info(slot, name, sizeof(name), file, sizeof(file));
-		if (slot == 0) s->plugins_known = (r == 0);
+		if (slot_answered(r)) s->plugins_known = true;
+		if (n < sizeof(g_slot_line) - 60) {
+			if (slot_empty(r)) n += snprintf(g_slot_line + n, sizeof(g_slot_line) - n, " %d:-", slot);
+			else if (r == 0) n += snprintf(g_slot_line + n, sizeof(g_slot_line) - n, " %d:%.12s", slot, base_name(file[0] ? file : name));
+			else n += snprintf(g_slot_line + n, sizeof(g_slot_line) - n, " %d:E%08x", slot, (unsigned)r);
+		}
 		if (r != 0 || (!name[0] && !file[0])) continue;
 		logf_("cobra vsh plugin slot %d: name='%s' file='%s'", slot, name, file);
 		if (strstr(file, "openpak_c")) { s->plugin_loaded = true; s->plugin_slot = slot; }
@@ -484,29 +509,134 @@ static void read_plugins(op_status *s)
 	}
 }
 
+/* Does the sprx pass the size check Cobra's loader makes before it loads a VSH plugin
+ * (modulespatch.c prx_load_vsh_plugin: file size >= SELF header_len + data_len, both read from the
+ * SELF header at +0x10 and +0x18)? A compressed SELF is shorter than that and is refused with
+ * EINVAL (0x80010002). */
+static void sprx_size_line(const char *path, const char *tag, char *out, size_t on)
+{
+	u64 len = 0;
+	unsigned char *b = read_all(path, 4 * 1024 * 1024, &len);
+	size_t n = strlen(out);
+	if (!b || len < 0x20) { snprintf(out + n, on - n, "%s missing; ", tag); free(b); return; }
+	{
+		u64 hl = 0, dl = 0;
+		int i;
+		for (i = 0; i < 8; i++) { hl = (hl << 8) | b[0x10 + i]; dl = (dl << 8) | b[0x18 + i]; }
+		snprintf(out + n, on - n, "%s %llu of %llu %s; ", tag, (unsigned long long)len,
+			 (unsigned long long)(hl + dl), len >= hl + dl ? "ok" : "SHORT");
+	}
+	free(b);
+}
+
+/* First lines of boot_plugins.txt, the way Cobra's read_text_line() sees them (leading blanks and
+ * control characters skipped, a line ends at CR or LF). */
+static void boot_list_line(char *out, size_t on)
+{
+	u64 len = 0, i = 0;
+	int lines = 0, shown = 0;
+	unsigned char *b = exists(OPENPAK_BOOT_LIST) ? read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len) : NULL;
+	size_t n = strlen(out);
+	int crlf = 0;
+
+	if (!b) { snprintf(out + n, on - n, "boot_plugins.txt: absent\n"); return; }
+	for (i = 0; i < len; i++) if (b[i] == '\r') crlf++;
+	n += snprintf(out + n, on - n, "boot_plugins.txt: %llu B, CR %d\n", (unsigned long long)len, crlf);
+	i = 0;
+	while (i < len) {
+		u64 j = i;
+		char ln[64];
+		size_t k = 0;
+		while (j < len && b[j] != '\n' && b[j] != '\r') { if (b[j] > ' ' || k) { if (k < sizeof(ln) - 1) ln[k++] = (char)b[j]; } j++; }
+		ln[k] = 0;
+		if (k) {
+			lines++;
+			if (shown < 5) {
+				/* keep the tail of the path: that is the part that differs */
+				const char *t = k > 34 ? ln + k - 34 : ln;
+				n += snprintf(out + n, on - n, " %d: %s%s\n", lines, k > 34 ? "~" : "", t);
+				shown++;
+			}
+		}
+		while (j < len && (b[j] == '\n' || b[j] == '\r')) j++;
+		i = j;
+	}
+	snprintf(out + n, on - n, " (%d lines)\n", lines);
+	free(b);
+}
+
+static void build_detail(op_status *s)
+{
+	char *d = s->detail;
+	size_t dn = sizeof(s->detail);
+	size_t n;
+
+	d[0] = 0;
+	snprintf(d, dn, "PS3MAPI %s\nSlots:%s\n", s->ps3mapi_note[0] ? s->ps3mapi_note : "-", g_slot_line);
+	boot_list_line(d, dn);
+	n = strlen(d);
+	snprintf(d + n, dn - n, "nocobra list: %s\nSize check: ", exists("/dev_hdd0/boot_plugins_nocobra.txt") ? "present" : "absent");
+	sprx_size_line(OPENPAK_PLUGIN_DST, "A", d, dn);
+	sprx_size_line(OPENPAK_PLUGIN_DST_C, "C", d, dn);
+	sprx_size_line(OPENPAK_PLUGIN_DST_B, "B", d, dn);
+	n = strlen(d);
+	snprintf(d + n, dn - n, "\nRan at boot: A %s, C %s, B %s\n", s->plugin_ran ? "yes" : "no",
+		 s->plugin_c_ran ? "yes" : "no", s->plugin_b_ran ? "yes" : "no");
+	n = strlen(d);
+	snprintf(d + n, dn - n, "Last load: %s", g_load_report[0] ? g_load_report : "not tried");
+	{
+		FILE *f = fopen(OPENPAK_DIAG, "w");
+		if (f) { fputs(d, f); fputc('\n', f); fclose(f); }
+	}
+	logf_("details:\n%s", d);
+}
+
+/* Load each wrapper into a free slot with Cobra's own call (syscall 8 opcode 0x1EE7, the one webMAN
+ * MOD's load_vsh_plugin uses), stopping at the first that Cobra accepts. g_load_report keeps every
+ * raw return value: 0 = loaded, 0x80010002 = EINVAL (missing, too short or bad slot),
+ * 0x80010005 = ESRCH (no vsh process), others come from the kernel module loader. */
 bool op_load_plugin(int *ret, int *slot)
 {
 	static char name[48], file[256];
-	int sl, use = -1;
-	s32 r;
+	static const char *const paths[3] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_C, OPENPAK_PLUGIN_DST_B };
+	int k, sl;
+	size_t gn = 0;
 
 	*ret = 0;
 	*slot = -1;
+	g_load_report[0] = 0;
 	ps3mapi_open();
-	for (sl = 1; sl < 7 && use < 0; sl++) {
-		if (plugin_slot_info(sl, name, sizeof(name), file, sizeof(file)) != 0) continue;
-		if (strstr(file, "openpak_ca")) { *slot = sl; *ret = 0; logf_("load plugin: already in slot %d", sl); ps3mapi_close(); return true; }
-		if (!name[0] && !file[0]) use = sl;
+	for (k = 0; k < 3; k++) {
+		int use = -1;
+		s32 r;
+		const char *bn = base_name(paths[k]);
+		for (sl = 1; sl < 7; sl++) {
+			int q = plugin_slot_info(sl, name, sizeof(name), file, sizeof(file));
+			if (q == 0 && strstr(file, bn)) { use = -2; *slot = sl; break; }
+			if (use < 0 && slot_empty(q)) use = sl;
+		}
+		if (use == -2) {
+			gn += snprintf(g_load_report + gn, sizeof(g_load_report) - gn, "%s already in slot %d. ", bn, *slot);
+			*ret = 0;
+			ps3mapi_close();
+			return true;
+		}
+		if (use < 0) {
+			gn += snprintf(g_load_report + gn, sizeof(g_load_report) - gn, "%s no free slot. ", bn);
+			*ret = (int)0x80010000;     /* ours, not Cobra's: nothing was called */
+			continue;
+		}
+		{ lv2syscall5(8, 0x1EE7, (u64)use, (u64)(u32)(uintptr_t)paths[k], 0, 0); r = (s32)p1; }
+		*ret = r;
+		*slot = use;
+		logf_("load plugin: slot %d path %s -> 0x%08x", use, paths[k], (unsigned)r);
+		gn += snprintf(g_load_report + gn, sizeof(g_load_report) - gn, "%s slot %d ret %08x. ", bn, use, (unsigned)r);
+		if (r == 0 && plugin_slot_info(use, name, sizeof(name), file, sizeof(file)) == 0 && file[0]) {
+			ps3mapi_close();
+			return true;
+		}
 	}
-	if (use < 0) { logf_("load plugin: no free slot (or the plugin query failed)"); *ret = (int)0x80010000; ps3mapi_close(); return false; }
-	*slot = use;
-	{ lv2syscall5(8, 0x1EE7, (u64)use, (u64)(u32)(uintptr_t)OPENPAK_PLUGIN_DST, 0, 0); r = (s32)p1; }
-	*ret = r;
-	logf_("load plugin: slot %d path %s -> 0x%08x", use, OPENPAK_PLUGIN_DST, (unsigned)r);
-	/* webMAN checks the slot afterwards: a loaded plugin has a file name there */
-	if (plugin_slot_info(use, name, sizeof(name), file, sizeof(file)) == 0 && file[0]) { ps3mapi_close(); return true; }
 	ps3mapi_close();
-	(void)r;
 	return false;
 }
 
@@ -528,7 +658,7 @@ void op_status_read(op_status *s)
 	c1 = read_all(path, MAX_CERT, &l1);
 	snprintf(path, sizeof(path), "%s/ca/%s", OPENPAK_USRDIR, CA_NAMES[1]);
 	c2 = read_all(path, MAX_CERT, &l2);
-	s->bundle_ok = c1 && c2 && l1 && l2 && exists(OPENPAK_USRDIR "/openpak_ca.sprx") && exists(OPENPAK_USRDIR "/openpak_cb.sprx");
+	s->bundle_ok = c1 && c2 && l1 && l2 && exists(OPENPAK_USRDIR "/openpak_ca.sprx") && exists(OPENPAK_USRDIR "/openpak_cb.sprx") && exists(OPENPAK_USRDIR "/openpak_cc.sprx");
 
 	b1 = read_all(CERT_DIR "/CA01.cer", MAX_CERT, &n);
 	if (b1 && c1 && n == l1 && memcmp(b1, c1, n) == 0) {
@@ -592,7 +722,7 @@ void op_status_read(op_status *s)
 		free(bb);
 	}
 	s->update_needed = s->installed &&
-		(strcmp(s->inst_ver, OPENPAK_VERSION) != 0 || !s->plugin_current || !s->ca_openpak || !s->plugin_listed);
+		(strcmp(s->inst_ver, OPENPAK_VERSION) != 0 || !s->plugin_current || !exists(OPENPAK_PLUGIN_DST_C) || !s->ca_openpak || !s->plugin_listed);
 	logf_("installed=%d version='%s' app=%s plugin_current=%d ca_openpak=%d listed=%d -> update_needed=%d",
 	      s->installed, s->inst_ver, OPENPAK_VERSION, s->plugin_current, s->ca_openpak, s->plugin_listed, s->update_needed);
 
@@ -613,6 +743,13 @@ void op_status_read(op_status *s)
 		}
 		free(st);
 	}
+
+	st = read_all(OPENPAK_STATUS_C, 256, &len);
+	if (st) {
+		s->plugin_c_ran = strstr((char *)st, "applied=") != NULL;
+		free(st);
+	}
+	build_detail(s);
 
 	snprintf(path, sizeof(path), "%s/%s", OPENPAK_BACKUP_DIR, CA_NAMES[0]);
 	s->backup_ok = exists(path);
@@ -734,6 +871,13 @@ bool op_switch_openpak(char *err, int err_len)
 		free(bb);
 		if (!w) FAIL("Could not install the second plugin file.");
 	}
+	{
+		u64 cl3 = 0;
+		unsigned char *cb3 = read_all(OPENPAK_USRDIR "/openpak_cc.sprx", 4 * 1024 * 1024, &cl3);
+		bool w = cb3 && cl3 && write_atomic(OPENPAK_PLUGIN_DST_C, cb3, cl3);
+		free(cb3);
+		if (!w) FAIL("Could not install the third plugin file.");
+	}
 	if (!boot_list_add()) FAIL("Could not update boot_plugins.txt.");
 	logf_("plugin installed, boot_plugins.txt updated");
 
@@ -811,6 +955,8 @@ bool op_switch_psn(char *err, int err_len)
 	if (!boot_list_remove()) FAIL("Could not update boot_plugins.txt.");
 	sysFsUnlink(OPENPAK_PLUGIN_DST);
 	sysFsUnlink(OPENPAK_PLUGIN_DST_B);
+	sysFsUnlink(OPENPAK_PLUGIN_DST_C);
+	sysFsUnlink(OPENPAK_STATUS_C);
 	sysFsUnlink(OPENPAK_STATUS_B);
 	sysFsUnlink(OPENPAK_STATUS);
 	sysFsUnlink(OPENPAK_REDIRECT_STATUS);

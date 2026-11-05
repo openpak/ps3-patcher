@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.10
+
+- Cause found for "Cobra plugins: query failed" and "Cobra load call ... 0x80010000": both were this
+  app, not Cobra. Cobra's `ps3mapi_get_vsh_plugin_info()` returns ENOENT (0x80010006) for an empty
+  slot (Cobra/Mamba `stage2/modulespatch.c`: `if (vsh_plugins[slot] == 0) return ENOENT`); webMAN MOD
+  ignores the return value and tests the cleared buffer. The app treated 0x80010006 as an error, so
+  it never found a free slot, never called Cobra's load (opcode 0x1EE7) and printed its own
+  placeholder 0x80010000 (v0.2.7/0.2.8 printed 0). PS3MAPI itself works (core 0x124, mode 0).
+- Cobra refuses a VSH plugin whose file is shorter than SELF header_len + data_len (same file, the
+  "semi-brick" guard). `openpak_cb.sprx` (make_self, compressed) is 9424 bytes against 206344
+  required, so it can never load. The details page prints this check for every wrapper.
+- New wrapper `openpak_cc.sprx`: the fself with the SELF application info of webMAN MOD's own sprx
+  (auth id 1070000052000001, version 0003004000000000). Boot list order: A, C, B.
+- "Load it now" tries A, C, B in turn into a free slot (1..6, as Cobra's boot loader) with Cobra's
+  call and shows every raw return code; it stops at the first accepted one.
+- A details page opens first: full PS3MAPI line, all seven slots, the first lines of boot_plugins.txt
+  with CR count, size check per wrapper, which wrappers ran at boot, last load result. Also written
+  to `/dev_hdd0/openpak/diag.txt`.
+
 ## v0.2.9
 
 - v0.2.8 on hardware: the plugin never ran from boot_plugins.txt. Cause candidate: the SELF wrapper.

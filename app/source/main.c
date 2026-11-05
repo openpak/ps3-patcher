@@ -136,20 +136,40 @@ static bool ask(bool yesno, const char *text)
 	return dlg_btn == MSG_DIALOG_BTN_YES || dlg_btn == MSG_DIALOG_BTN_OK;
 }
 
+/* System message dialogs hold about 512 bytes, so long text goes out in pages cut at line ends. */
+static void ask_pages(const char *text)
+{
+	char page[480];
+	const char *p = text;
+	while (*p && !want_exit) {
+		size_t n = 0, last = 0;
+		while (p[n] && n < sizeof(page) - 24) {
+			if (p[n] == '\n') last = n + 1;
+			n++;
+		}
+		if (p[n] && last) n = last;
+		memcpy(page, p, n);
+		page[n] = 0;
+		p += n;
+		if (*p == '\n') p++;
+		if (n) ask(false, page);
+	}
+}
+
 static void build_status(const op_status *s, char *out, size_t n)
 {
 	bool on = op_is_openpak(s);
 	char plug[64], redir[96], live[160], cobp[64];
 
 	if (!s->plugin_listed) snprintf(plug, sizeof(plug), "not installed");
-	else if (!s->plugin_ran && !s->plugin_b_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
+	else if (!s->plugin_ran && !s->plugin_b_ran && !s->plugin_c_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
 	else {
 		int a = s->plugin_ran ? s->pokes_applied : s->pokes_b_applied;
 		int t = s->plugin_ran ? s->pokes_total : s->pokes_b_total;
-		snprintf(plug, sizeof(plug), "loaded %d/%d (%s%s)", a, t, s->plugin_ran ? "A" : "", s->plugin_b_ran ? (s->plugin_ran ? "+B" : "B") : "");
+		snprintf(plug, sizeof(plug), "loaded %d/%d (%s%s%s)", a, t, s->plugin_ran ? "A" : "", s->plugin_c_ran ? "C" : "", s->plugin_b_ran ? "B" : "");
 	}
 
-	if (!s->plugins_known) snprintf(cobp, sizeof(cobp), "query failed (see log)");
+	if (!s->plugins_known) snprintf(cobp, sizeof(cobp), "no answer from PS3MAPI");
 	else if (s->plugin_loaded) snprintf(cobp, sizeof(cobp), "OpenPak loaded (slot %d)", s->plugin_slot);
 	else snprintf(cobp, sizeof(cobp), "OpenPak NOT loaded (%d others)", s->plugins_other);
 
@@ -233,18 +253,22 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
+	/* Details page first: the full PS3MAPI line, every slot, boot_plugins.txt, the size check of each
+	 * wrapper and (after "Load it now") Cobra's raw answers. Also written to /dev_hdd0/openpak/diag.txt. */
+	if (s.installed || s.plugin_file) ask_pages(s.detail);
+
 	/* The plugin is installed but Cobra has not loaded it: offer to load it now, and show the raw
 	 * return code of Cobra's load call (0 = loaded). */
 	if (s.plugin_file && !s.plugin_loaded) {
 		strncat(text, "\n\nThe plugin is not loaded. Load it now?", sizeof(text) - strlen(text) - 1);
 		if (ask(true, text)) {
 			int ret = 0, slot = -1;
-			char msg[300];
+			char msg[700];
 			bool ok = op_load_plugin(&ret, &slot);
 			sleep(7);
-			snprintf(msg, sizeof(msg), "Cobra load call: slot %d, return 0x%08x (%s).", slot, (unsigned)ret,
-				 ok ? "accepted" : "rejected or failed");
-			ask(false, msg);
+			snprintf(msg, sizeof(msg), "Cobra load call: last slot %d, return 0x%08x (%s).\n%s", slot, (unsigned)ret,
+				 ok ? "accepted" : "rejected or failed", op_load_report());
+			ask_pages(msg);
 			op_status_read(&s);
 			build_status(&s, text, sizeof(text));
 		} else {

@@ -43,6 +43,9 @@
 #if OPENPAK_VARIANT == 1
 #define STATUS_PATH "/dev_hdd0/openpak/plugin.status"
 #define REDIR_PATH "/dev_hdd0/openpak/redirect.status"
+#elif OPENPAK_VARIANT == 3
+#define STATUS_PATH "/dev_hdd0/openpak/plugin.c.status"
+#define REDIR_PATH "/dev_hdd0/openpak/redirect.c.status"
 #else
 #define STATUS_PATH "/dev_hdd0/openpak/plugin.b.status"
 #define REDIR_PATH "/dev_hdd0/openpak/redirect.b.status"
