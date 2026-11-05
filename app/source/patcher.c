@@ -174,7 +174,7 @@ static bool is_line(const unsigned char *p, size_t n, const char *path)
 
 static bool is_our_line(const unsigned char *p, size_t n)
 {
-	return is_line(p, n, OPENPAK_PLUGIN_DST) || is_line(p, n, OPENPAK_PLUGIN_DST_B) || is_line(p, n, OPENPAK_PLUGIN_DST_C);
+	return is_line(p, n, OPENPAK_PLUGIN_DST) || is_line(p, n, OPENPAK_PLUGIN_DST_B) || is_line(p, n, OPENPAK_PLUGIN_DST_C) || is_line(p, n, OPENPAK_PLUGIN_DST_D);
 }
 
 static bool list_has_path(const unsigned char *buf, u64 len, const char *path)
@@ -191,7 +191,7 @@ static bool list_has_path(const unsigned char *buf, u64 len, const char *path)
 
 static bool list_has_ours(const unsigned char *buf, u64 len)
 {
-	return list_has_path(buf, len, OPENPAK_PLUGIN_DST) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_B) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_C);
+	return list_has_path(buf, len, OPENPAK_PLUGIN_DST) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_B) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_C) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_D);
 }
 
 static bool boot_list_add(void)
@@ -199,17 +199,18 @@ static bool boot_list_add(void)
 	u64 len = 0;
 	unsigned char *buf = NULL, *out;
 	bool ok;
-	const char *paths[2] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_C };
+	const char *paths[3] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_C, OPENPAK_PLUGIN_DST_D };
 	int k;
 
 	if (exists(OPENPAK_BOOT_LIST)) {
 		buf = read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len);
 		if (!buf) return false;
 	}
-	out = malloc(len + strlen(paths[0]) + strlen(paths[1]) + 8);
+	out = malloc(len + strlen(paths[0]) + strlen(paths[1]) + strlen(paths[2]) + 8);
 	if (!out) { free(buf); return false; }
 	if (len) memcpy(out, buf, len);
-	for (k = 0; k < 2; k++) {
+	for (k = 0; k < 3; k++) {
+		if (k == 2 && !exists(paths[k])) continue;     /* the signed wrapper is optional */
 		if (buf && list_has_path(buf, len, paths[k])) continue;
 		if (len && out[len - 1] != '\n') out[len++] = '\n';
 		memcpy(out + len, paths[k], strlen(paths[k]));
@@ -523,8 +524,11 @@ static void sprx_size_line(const char *path, const char *tag, char *out, size_t 
 		u64 hl = 0, dl = 0;
 		int i;
 		for (i = 0; i < 8; i++) { hl = (hl << 8) | b[0x10 + i]; dl = (dl << 8) | b[0x18 + i]; }
-		snprintf(out + n, on - n, "%s %llu of %llu %s; ", tag, (unsigned long long)len,
-			 (unsigned long long)(hl + dl), len >= hl + dl ? "ok" : "SHORT");
+		/* the ELF header copy sits at 0x90 in the SELF: e_type 0xFFA4 = real PRX, 2 = the old ET_EXEC build */
+		unsigned et = len > 0x92 ? ((unsigned)b[0x90 + 16] << 8) | b[0x90 + 17] : 0;
+		snprintf(out + n, on - n, "%s %llu/%llu %s %s; ", tag, (unsigned long long)len,
+			 (unsigned long long)(hl + dl), len >= hl + dl ? "ok" : "SHORT",
+			 et == 0xFFA4 ? "PRX" : et == 2 ? "OLD-EXEC" : "type?");
 	}
 	free(b);
 }
@@ -565,6 +569,8 @@ static void boot_list_line(char *out, size_t on)
 	free(b);
 }
 
+static char g_cmp_line[260];     /* installed vs bundled plugin files, set by op_status_read */
+
 static void build_detail(op_status *s)
 {
 	char *d = s->detail;
@@ -572,15 +578,18 @@ static void build_detail(op_status *s)
 	size_t n;
 
 	d[0] = 0;
-	snprintf(d, dn, "PS3MAPI %s\nSlots:%s\n", s->ps3mapi_note[0] ? s->ps3mapi_note : "-", g_slot_line);
+	snprintf(d, dn, "App v" OPENPAK_VERSION "\nPS3MAPI %s\nSlots:%s\n", s->ps3mapi_note[0] ? s->ps3mapi_note : "-", g_slot_line);
 	boot_list_line(d, dn);
 	n = strlen(d);
 	snprintf(d + n, dn - n, "nocobra list: %s\nSize check: ", exists("/dev_hdd0/boot_plugins_nocobra.txt") ? "present" : "absent");
 	sprx_size_line(OPENPAK_PLUGIN_DST, "A", d, dn);
 	sprx_size_line(OPENPAK_PLUGIN_DST_C, "C", d, dn);
+	if (exists(OPENPAK_PLUGIN_DST_D)) sprx_size_line(OPENPAK_PLUGIN_DST_D, "D", d, dn);
 	n = strlen(d);
-	snprintf(d + n, dn - n, "\nRan at boot: A %s, C %s\n", s->plugin_ran ? "yes" : "no",
-		 s->plugin_c_ran ? "yes" : "no");
+	snprintf(d + n, dn - n, "\n%s", g_cmp_line);
+	n = strlen(d);
+	snprintf(d + n, dn - n, "Ran at boot: A %s, C %s, D %s\n", s->plugin_ran ? "yes" : "no",
+		 s->plugin_c_ran ? "yes" : "no", s->plugin_d_ran ? "yes" : "no");
 	n = strlen(d);
 	snprintf(d + n, dn - n, "Last load: %s", g_load_report[0] ? g_load_report : "not tried");
 	{
@@ -597,7 +606,7 @@ static void build_detail(op_status *s)
 bool op_load_plugin(int *ret, int *slot)
 {
 	static char name[48], file[256];
-	static const char *const paths[2] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_C };
+	static const char *const paths[3] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_C, OPENPAK_PLUGIN_DST_D };
 	int k, sl;
 	size_t gn = 0;
 
@@ -605,8 +614,9 @@ bool op_load_plugin(int *ret, int *slot)
 	*slot = -1;
 	g_load_report[0] = 0;
 	ps3mapi_open();
-	for (k = 0; k < 2; k++) {
+	for (k = 0; k < 3; k++) {
 		int use = -1;
+		if (k == 2 && !exists(paths[k])) break;
 		s32 r;
 		const char *bn = base_name(paths[k]);
 		for (sl = 1; sl < 7; sl++) {
@@ -712,16 +722,47 @@ void op_status_read(op_status *s)
 		free(st);
 	}
 	s->installed = s->plugin_listed || s->inst_ver[0];
+	/* Every installed plugin file against the copy bundled in this pkg, byte for byte (so size and hash
+	 * both), not the version marker: a marker can say "current" over old files. */
 	{
-		u64 il = 0, bl = 0;
-		unsigned char *ib = read_all(OPENPAK_PLUGIN_DST, 4 * 1024 * 1024, &il);
-		unsigned char *bb = read_all(OPENPAK_USRDIR "/openpak_ca.sprx", 4 * 1024 * 1024, &bl);
-		s->plugin_current = ib && bb && il == bl && il && memcmp(ib, bb, il) == 0;
-		free(ib);
-		free(bb);
+		static const struct { const char *tag, *inst, *bund; bool optional; } w[3] = {
+			{ "A", OPENPAK_PLUGIN_DST, OPENPAK_USRDIR "/openpak_ca.sprx", false },
+			{ "C", OPENPAK_PLUGIN_DST_C, OPENPAK_USRDIR "/openpak_cc.sprx", false },
+			{ "D", OPENPAK_PLUGIN_DST_D, OPENPAK_USRDIR "/openpak_cd.sprx", true },
+		};
+		int k;
+		bool all = true;
+		size_t n = 0;
+		unsigned char *ls = read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len);
+
+		g_cmp_line[0] = 0;
+		for (k = 0; k < 3; k++) {
+			u64 il = 0, bl = 0;
+			unsigned char *ib, *bb;
+			const char *res;
+			if (w[k].optional && !exists(w[k].bund)) continue;
+			ib = exists(w[k].inst) ? read_all(w[k].inst, 4 * 1024 * 1024, &il) : NULL;
+			bb = read_all(w[k].bund, 4 * 1024 * 1024, &bl);
+			if (!ib) res = "MISSING";
+			else if (!bb || !bl || il != bl || memcmp(ib, bb, il) != 0) res = "DIFFERS";
+			else res = "same";
+			if (strcmp(res, "same")) all = false;
+			n += snprintf(g_cmp_line + n, sizeof(g_cmp_line) - n, "%s on disk %llu, in pkg %llu: %s\n", w[k].tag,
+				      (unsigned long long)il, (unsigned long long)bl, res);
+			if (!ls || !list_has_path(ls, len, w[k].inst)) all = false;      /* boot line missing */
+			free(ib);
+			free(bb);
+		}
+		/* a line for a file we no longer ship (v0.2.9/v0.2.10 listed openpak_cb.sprx) */
+		if (ls && list_has_path(ls, len, OPENPAK_PLUGIN_DST_B)) {
+			all = false;
+			snprintf(g_cmp_line + n, sizeof(g_cmp_line) - n, "boot list still has openpak_cb\n");
+		}
+		free(ls);
+		s->plugin_current = all;
 	}
 	s->update_needed = s->installed &&
-		(strcmp(s->inst_ver, OPENPAK_VERSION) != 0 || !s->plugin_current || !exists(OPENPAK_PLUGIN_DST_C) || !s->ca_openpak || !s->plugin_listed);
+		(strcmp(s->inst_ver, OPENPAK_VERSION) != 0 || !s->plugin_current || !s->ca_openpak || !s->plugin_listed);
 	logf_("installed=%d version='%s' app=%s plugin_current=%d ca_openpak=%d listed=%d -> update_needed=%d",
 	      s->installed, s->inst_ver, OPENPAK_VERSION, s->plugin_current, s->ca_openpak, s->plugin_listed, s->update_needed);
 
@@ -732,6 +773,15 @@ void op_status_read(op_status *s)
 		ps3mapi_close();
 	}
 
+	st = read_all(OPENPAK_STATUS_D, 256, &len);
+	if (st) {
+		int a, v, t;
+		if (sscanf((char *)st, "applied=%d verified=%d total=%d", &a, &v, &t) == 3) {
+			s->plugin_d_ran = true;
+			if (!s->plugin_ran) { s->pokes_applied = a; s->pokes_verified = v; s->pokes_total = t; }
+		}
+		free(st);
+	}
 	st = read_all(OPENPAK_STATUS_C, 256, &len);
 	if (st) {
 		int a, v, t;
@@ -863,6 +913,13 @@ bool op_switch_openpak(char *err, int err_len)
 		free(cb3);
 		if (!w) FAIL("Could not install the third plugin file.");
 	}
+	if (exists(OPENPAK_USRDIR "/openpak_cd.sprx")) {
+		u64 dl3 = 0;
+		unsigned char *db3 = read_all(OPENPAK_USRDIR "/openpak_cd.sprx", 4 * 1024 * 1024, &dl3);
+		bool w = db3 && dl3 && write_atomic(OPENPAK_PLUGIN_DST_D, db3, dl3);
+		free(db3);
+		if (!w) FAIL("Could not install the signed plugin file.");
+	}
 	/* drop every OpenPak line first (older versions listed a third file), then add ours; other lines stay */
 	if (!boot_list_remove() || !boot_list_add()) FAIL("Could not update boot_plugins.txt.");
 	logf_("plugin installed, boot_plugins.txt updated");
@@ -943,6 +1000,8 @@ bool op_switch_psn(char *err, int err_len)
 	sysFsUnlink(OPENPAK_PLUGIN_DST_B);
 	sysFsUnlink(OPENPAK_PLUGIN_DST_C);
 	sysFsUnlink(OPENPAK_STATUS_C);
+	sysFsUnlink(OPENPAK_PLUGIN_DST_D);
+	sysFsUnlink(OPENPAK_STATUS_D);
 	sysFsUnlink(OPENPAK_STATUS_B);   /* legacy v0.2.9/v0.2.10 files */
 	sysFsUnlink(OPENPAK_STATUS);
 	sysFsUnlink(OPENPAK_REDIRECT_STATUS);

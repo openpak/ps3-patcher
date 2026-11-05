@@ -11,10 +11,12 @@
 #define OPENPAK_PLUGIN_DST "/dev_hdd0/plugins/openpak_ca.sprx"
 #define OPENPAK_PLUGIN_DST_B "/dev_hdd0/plugins/openpak_cb.sprx"   /* legacy (v0.2.9, v0.2.10): removed on update */
 #define OPENPAK_PLUGIN_DST_C "/dev_hdd0/plugins/openpak_cc.sprx"   /* third wrapper: fself with webMAN's app info */
+#define OPENPAK_PLUGIN_DST_D "/dev_hdd0/plugins/openpak_cd.sprx"   /* optional: scetool-signed SELF (webMAN MOD's own packaging) */
 #define OPENPAK_BOOT_LIST  "/dev_hdd0/boot_plugins.txt"
 #define OPENPAK_STATUS     OPENPAK_DIR "/plugin.status"
 #define OPENPAK_STATUS_B   OPENPAK_DIR "/plugin.b.status"
 #define OPENPAK_STATUS_C   OPENPAK_DIR "/plugin.c.status"
+#define OPENPAK_STATUS_D   OPENPAK_DIR "/plugin.d.status"
 #define OPENPAK_DIAG       OPENPAK_DIR "/diag.txt"
 #define OPENPAK_INSTALLED  OPENPAK_DIR "/installed.txt"
 #define OPENPAK_REDIRECT_STATUS OPENPAK_DIR "/redirect.status"
@@ -36,6 +38,7 @@ typedef struct {
 	bool plugin_file;     /* sprx present in /dev_hdd0/plugins */
 	bool plugin_ran;      /* plugin.status written by this boot's plugin */
 	int  pokes_applied, pokes_verified, pokes_total;
+	bool plugin_d_ran;    /* plugin.d.status written (signed wrapper) */
 	bool plugin_c_ran;    /* plugin.c.status written (third SELF wrapper) */
 	char detail[1500];    /* the details page: PS3MAPI, every slot, boot list, file checks, last load */
 	char ps3mapi_note[160];   /* raw PS3MAPI answers, for the status screen */

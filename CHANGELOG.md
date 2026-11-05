@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.2.12
+
+- v0.2.11 on hardware: the new files never reached the console (A still the 206088-byte ET_EXEC,
+  no cc, the cb line still in boot_plugins.txt). The app had offered "Load it now?" before the setup
+  update, and that load ran against the old files. Now every start compares each installed plugin
+  file with the copy bundled in the pkg, byte for byte (so size and hash), plus the boot_plugins.txt
+  lines (ours present, the retired openpak_cb line absent). Any difference or missing file makes the
+  update the first question; it rewrites the files and our boot lines (other lines untouched).
+  The version marker is only one input, no longer the deciding one.
+- The details page prints, per wrapper, `on disk N, in pkg M: same|DIFFERS|MISSING`.
+
+- Update first: when the installed setup is older than this app, the update question comes before
+  "Load it now?" (v0.2.11 hardware: "Load it now" ran against the old v0.2.9 ET_EXEC files and the
+  missing cc file, 0x80011148 and 0x80010002). After a successful update, answering No to the restart
+  falls through to "Load it now?" with the new files.
+- Details page: app version, and for each wrapper `size/needed ok|SHORT` plus `PRX` (e_type 0xFFA4),
+  `OLD-EXEC` (the pre-v0.2.11 build) or `type?`, so one photo shows which files are installed.
+- Optional wrapper D, `openpak_cd.sprx`: the same PRX signed with scetool exactly as webMAN MOD's own
+  sprx (key revision 0x0A, auth id 1070000052000001, APP, compressed, ctrl flags
+  4000...0002). Built only when `SCETOOL` and `SCE_DATA` are given to `make -C plugin`; the keys are
+  not part of this repository. Ordering: A, C, D.
+- `0x80010002` (EINVAL) from Cobra's load call: its loader returns it for a slot >= 7, a file it
+  cannot stat, a file under 0x230 bytes, a SELF shorter than header_len + data_len, or an unreadable file
+  (Mamba `modulespatch.c` `prx_load_vsh_plugin`). The missing cc file is the first of these.
+
 ## v0.2.11
 
 - v0.2.10 on hardware: Cobra's load call now reaches the kernel module loader, which answers

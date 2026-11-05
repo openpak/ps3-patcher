@@ -42,6 +42,7 @@ stage-pkg: $(TARGET).elf
 	mkdir -p $(PKGFILES)/USRDIR/ca
 	cp ../dist/dev_flash/data/cert/CA01.cer ../dist/dev_flash/data/cert/CA59.cer $(PKGFILES)/USRDIR/ca/
 	cp ../plugin/openpak_ca.sprx ../plugin/openpak_cc.sprx $(PKGFILES)/USRDIR/
+	@if [ -f ../plugin/openpak_cd.sprx ]; then cp ../plugin/openpak_cd.sprx $(PKGFILES)/USRDIR/; echo "bundled the signed wrapper openpak_cd.sprx"; fi
 
 pkg: stage-pkg $(TARGET).pkg
 	cp $(TARGET).pkg OpenPak-PS3-Patcher-v$(APP_VERSION).pkg

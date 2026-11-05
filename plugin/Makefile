@@ -25,7 +25,16 @@ GEN     := openpak_ca_patch.h
 CFLAGS  := -O2 -Wall -fpic -ffreestanding -ffunction-sections -fno-asynchronous-unwind-tables -fno-unwind-tables
 LDFLAGS := -nostartfiles -nostdlib -fpic -Wl,-q -Wl,-z,max-page-size=16 -Wl,-z,common-page-size=16 -T prx.ld
 
-all: $(TARGET).sprx $(TARGET_C).sprx
+TARGET_D:= openpak_cd
+
+# The signed wrapper is built only when SCETOOL points at a scetool binary whose data directory (the
+# console keys, which this repository does not carry) is SCE_DATA: webMAN MOD's own packaging, key
+# revision 0x0A, auth id 1070000052000001, application type APP, compressed data.
+ifdef SCETOOL
+SIGNED := $(TARGET_D).sprx
+endif
+
+all: $(TARGET).sprx $(TARGET_C).sprx $(SIGNED)
 
 # The module is linked with prx.ld (a PRX layout at vaddr 0), converted by ../tools/elf2prx.py into an
 # ET_SCE_PPURELEXEC file with a relocation segment, then wrapped as a fake SELF by PSL1GHT's fself.
@@ -68,7 +77,19 @@ $(TARGET_C).sprx: $(TARGET_C).prx
 	printf '\020\160\000\000\122\000\000\001' | dd of=$@ bs=1 seek=112 conv=notrunc 2>/dev/null
 	printf '\000\003\000\100\000\000\000\000' | dd of=$@ bs=1 seek=128 conv=notrunc 2>/dev/null
 
+$(TARGET_D).o: $(TARGET).c $(GEN)
+	$(CC) $(CFLAGS) -DOPENPAK_VARIANT=4 -c $< -o $@
+
+module_d.o: module.S
+	$(CC) -DMODNAME='"openpak_cd"' -c $< -o $@
+
+$(TARGET_D).elf: $(TARGET_D).o module_d.o prx.ld
+	$(CC) $(LDFLAGS) $(TARGET_D).o module_d.o -o $@
+
+$(TARGET_D).sprx: $(TARGET_D).prx
+	cd "$(SCE_DATA)/.." && $(SCETOOL) -0 SELF -1 TRUE -s FALSE -2 0A -3 1070000052000001 -4 01000002 -5 APP -6 0003004000000000 -A 0001000000000000 --self-ctrl-flags 4000000000000000000000000000000000000000000000000000000000000002 -e $(CURDIR)/$< $(CURDIR)/$@
+
 clean:
-	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).prx $(TARGET).sprx $(TARGET_C).o module_c.o $(TARGET_C).elf $(TARGET_C).prx $(TARGET_C).sprx openpak_cb.*
+	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).prx $(TARGET).sprx $(TARGET_C).o module_c.o $(TARGET_C).elf $(TARGET_C).prx $(TARGET_C).sprx $(TARGET_D).o module_d.o $(TARGET_D).elf $(TARGET_D).prx $(TARGET_D).sprx openpak_cb.*
 
 .PHONY: all clean
