@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.14
+
+- v0.2.13 on hardware: all wrappers load into slots 1-3 and none runs: no beep, no plugin.log.
+  Cause: function descriptors. Cobra starts a plugin by reading 8 bytes at the module's exported start
+  entry as `u32 toc[2]` = {entry, toc} and creating the start thread from that (Mamba
+  `lv2/src/modules_c.c` `prx_start_module_with_thread`). Firmware PRXs (checked on `ap_plugin.prx`)
+  export 8-byte descriptors {u32 entry, u32 toc}. Our export pointed at the compiler's 24-byte ELFv1
+  entry {u64 entry, u64 toc, u64 env}, whose first 8 bytes read as {0, entry}: a start thread at
+  address 0, which dies silently while Cobra still reports the load as done.
+- `module.S` now exports hand-built 8-byte descriptors for module_start and module_stop, and the scan
+  thread is created from one too (`sys_ppu_thread_create` takes the same kind); `tools/elf2prx.py`
+  fills in their toc word and relocations (`openpak_opd_*`).
+- The pkg carries `USRDIR/wrappers.txt` (one letter per shipped wrapper). Installing a pkg over an older
+  one leaves the older version's files in USRDIR, which is why v0.2.13 still saw and installed
+  v0.2.12's cc and cd; only listed wrappers count as bundled now, and an update removes the others
+  from /dev_hdd0/plugins and the boot list.
+
 ## v0.2.13
 
 - v0.2.12 on hardware: Cobra loads the plugin at boot (slot 3, so all three wrappers A, C and D load:

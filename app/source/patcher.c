@@ -194,6 +194,26 @@ static bool list_has_ours(const unsigned char *buf, u64 len)
 	return list_has_path(buf, len, OPENPAK_PLUGIN_DST) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_B) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_C) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_D);
 }
 
+/* Which wrappers this pkg ships. Installing a pkg over an older one leaves the older version's files in
+ * USRDIR (v0.2.13 still saw v0.2.12's cc/cd and kept installing them), so the pkg carries a manifest,
+ * USRDIR/wrappers.txt with one letter (a, c, d) per line, and only listed files count as bundled. */
+static bool bundled(char letter)
+{
+	u64 len = 0;
+	unsigned char *b = read_all(OPENPAK_USRDIR "/wrappers.txt", 64, &len);
+	bool r = false;
+	u64 i;
+	char path[96];
+	if (b) {
+		for (i = 0; i < len; i++) if (b[i] == (unsigned char)letter) r = true;
+		free(b);
+	} else {
+		r = letter == 'a';
+	}
+	snprintf(path, sizeof(path), OPENPAK_USRDIR "/openpak_c%c.sprx", letter);
+	return r && exists(path);
+}
+
 static bool boot_list_add(void)
 {
 	u64 len = 0;
@@ -756,7 +776,7 @@ void op_status_read(op_status *s)
 			u64 il = 0, bl = 0;
 			unsigned char *ib, *bb;
 			const char *res;
-			if (w[k].optional && !exists(w[k].bund)) {
+			if (!bundled(w[k].tag[0] + 32)) {
 				if (exists(w[k].inst)) {      /* installed by an older version, not shipped any more: remove on update */
 					all = false;
 					n += snprintf(g_cmp_line + n, sizeof(g_cmp_line) - n, "%s on disk, not in pkg: STALE\n", w[k].tag);
@@ -931,13 +951,13 @@ bool op_switch_openpak(char *err, int err_len)
 	if (!write_atomic(OPENPAK_PLUGIN_DST, sprx, sl)) FAIL("Could not install the plugin.");
 	/* extra wrappers: installed only when this pkg carries them, removed otherwise */
 	{
-		static const struct { const char *dst, *src; } x[2] = {
-			{ OPENPAK_PLUGIN_DST_C, OPENPAK_USRDIR "/openpak_cc.sprx" },
-			{ OPENPAK_PLUGIN_DST_D, OPENPAK_USRDIR "/openpak_cd.sprx" },
+		static const struct { const char *dst, *src; char letter; } x[2] = {
+			{ OPENPAK_PLUGIN_DST_C, OPENPAK_USRDIR "/openpak_cc.sprx", 'c' },
+			{ OPENPAK_PLUGIN_DST_D, OPENPAK_USRDIR "/openpak_cd.sprx", 'd' },
 		};
 		int q;
 		for (q = 0; q < 2; q++) {
-			if (exists(x[q].src)) {
+			if (bundled(x[q].letter)) {
 				u64 xl = 0;
 				unsigned char *xb = read_all(x[q].src, 4 * 1024 * 1024, &xl);
 				bool w = xb && xl && write_atomic(x[q].dst, xb, xl);

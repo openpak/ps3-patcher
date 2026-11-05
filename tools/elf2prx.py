@@ -164,6 +164,22 @@ def main(src, dst):
         if (mi_seg, mo + f) not in have:
             sys.exit("module info field +%#x has no relocation" % f)
 
+    # 8-byte function descriptors {entry, toc} (module.S, symbols openpak_opd_*): the entry word has its own
+    # ADDR32 relocation from the assembler, the toc word is the module's TOC base
+    nopd = 0
+    for nm, sy in byname.items():
+        if not nm.startswith("openpak_opd_"):
+            continue
+        sec = secs[sy["shndx"]]
+        ds = segof(sec["addr"])
+        do = sy["val"] - segs[ds]["va"]
+        if (ds, do) not in have:
+            sys.exit("descriptor %s has no entry relocation" % nm)
+        relocs.append((ds, do + 4, 1, R_ADDR32, toc - segs[1]["va"]))
+        nopd += 1
+    if nopd < 3:
+        sys.exit("expected the openpak_opd_* descriptors, found %d" % nopd)
+
     relocs.sort(key=lambda r: (r[0], r[1]))
     rel = b"".join(struct.pack(">QHBBIQ", r[1], 0, r[2], r[0], r[3], r[4]) for r in relocs)
 

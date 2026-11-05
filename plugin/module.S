@@ -37,8 +37,8 @@ openpak_nid_table:
 	.section .rodata.sceResident, "a"
 	.align 2
 openpak_add_table:
-	.int module_start          /* ELFv1: resolves to the function's .opd descriptor */
-	.int module_stop
+	.int openpak_opd_start     /* 8-byte {entry, toc} descriptors, see below */
+	.int openpak_opd_stop
 	.int openpak_module_info
 
 	/* The resident library entry itself (0x1c bytes). */
@@ -56,3 +56,24 @@ openpak_lib_ent:
 	.int 0                     /* libname = 0 (resident module entry) */
 	.int openpak_nid_table
 	.int openpak_add_table
+
+	/* PS3 user-mode function descriptors are 8 bytes, {u32 entry, u32 toc} (the firmware's own PRXs,
+	 * e.g. ap_plugin.prx, export those). The compiler's own .opd entries are the 24-byte ELFv1 kind;
+	 * lv2 and Cobra read the exported start/stop entry and every thread entry as the 8-byte kind
+	 * (Cobra: copy_from_process(.., &toc, sizeof(u32[2])) then creates the start thread from it), so an
+	 * export that pointed at a 24-byte entry started the thread at address 0. The toc word is filled
+	 * in by tools/elf2prx.py (symbols openpak_opd_*) because it is the module's TOC base. */
+	.section .rodata.opd32, "a"
+	.align 3
+	.globl openpak_opd_start
+openpak_opd_start:
+	.int .module_start
+	.int 0
+	.globl openpak_opd_stop
+openpak_opd_stop:
+	.int .module_stop
+	.int 0
+	.globl openpak_opd_scan
+openpak_opd_scan:
+	.int .scan_thread
+	.int 0

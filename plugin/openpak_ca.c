@@ -312,7 +312,7 @@ static void flush_status(void)
  * syscalls above and read-only tables. Passes: 5 s after boot, then back-to-back with a 2 s gap
  * for ~24 passes (a module that loads later is caught within one pass), then every 20 s for 36
  * more, then every 2 minutes. */
-static void scan_thread(u64 arg)
+void scan_thread(u64 arg)
 {
 	struct rd_state st;
 	int lastnbk = -1, lastfail = -1, i, dirty = 0;
@@ -356,6 +356,7 @@ static void scan_thread(u64 arg)
 	for (;;) usleep_(1000000);
 }
 
+extern const u32 openpak_opd_scan[2];
 struct thread_param { u32 entry; u32 tls; };
 
 static int start_scan_thread(void)
@@ -363,7 +364,7 @@ static int start_scan_thread(void)
 	struct thread_param param;
 	u64 tid = 0;
 
-	param.entry = (u32)(u64)scan_thread;       /* the function descriptor (OPD) address */
+	param.entry = (u32)(u64)openpak_opd_scan;    /* 8-byte {entry, toc} descriptor (module.S) */
 	param.tls = 0;
 	if (sc8(SC_THREAD_CREATE, (long)&tid, (long)&param, 0, 0, 3000, 0x10000, 0, (long)"OpenPak names") != 0)
 		return -1;
