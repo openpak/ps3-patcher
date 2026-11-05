@@ -221,6 +221,34 @@ int main(int argc, char **argv)
 
 	op_status_read(&s);
 	build_status(&s, text, sizeof(text));
+
+	/* Self-update first: a newer, signed release of this app. Silent when offline or current; a
+	 * declined version is not offered again. */
+	{
+		up_manifest um;
+		char uwhy[64];
+		if (op_update_check(&um, uwhy, sizeof(uwhy)) && !op_update_declined(um.version)) {
+			char q[200];
+			snprintf(q, sizeof(q), "OpenPak PS3 Patcher v%s is available (you have v%s). Update now?", um.version, OPENPAK_VERSION);
+			if (ask(true, q)) {
+				char path[200], err[200], msg[700];
+				bool queued = false;
+				ask(false, "Downloading the update. This takes a few seconds; press OK to start.");
+				if (!op_update_fetch(&um, path, sizeof(path), err, sizeof(err))) {
+					snprintf(msg, sizeof(msg), "Update failed: %s\n\nNothing was changed.", err);
+					ask(false, msg);
+				} else if (op_update_handoff(path, s.plugin_loaded, &queued, msg, sizeof(msg))) {
+					ask(false, msg);
+					goto out;
+				} else {
+					ask(false, msg);
+				}
+			} else {
+				op_update_decline(um.version);
+			}
+		}
+	}
+
 	if (!op_supported(&s, why, sizeof(why))) {
 		strncat(text, "\n\n", sizeof(text) - strlen(text) - 1);
 		strncat(text, why, sizeof(text) - strlen(text) - 1);

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.9 (unreleased)
+
+- Self-update. On launch the app checks `updates.ps3.openpak.org` (plain HTTP, a relay of the newest
+  GitHub release) and asks "OpenPak PS3 Patcher vY is available (you have vX). Update now?", once per
+  version. The release manifest is Ed25519-signed by a release-signing key pinned in the app (separate
+  from the redirect ceiling key); the package's size and sha256 are checked against it. Nothing
+  unverified is installed. Details: docs/update.md.
+- Install through the plugin, silently from the XMB (vsh `game_ext_plugin` installPKG, as webMAN MOD
+  does); until the plugin loads the package is saved to /dev_hdd0/packages for the Package Manager.
+- The plugin now imports `paf` (View_Find, plugin_GetInterface) and `sysPrxForUser`
+  (sys_ppu_thread_create/exit) and runs its scan thread as a proper PPU thread.
+- Release workflow signs and publishes `manifest.txt` and `manifest.sig`, and tests them with the
+  app's verifier.
+
 ## v0.2.8 (unreleased)
 
 - Update flow on launch: the app compares the installed setup with what it carries (version marker

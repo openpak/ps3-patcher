@@ -39,14 +39,18 @@ $(TARGET).o: $(TARGET).c $(GEN)
 module.o: module.S
 	$(CC) -c $< -o $@
 
-$(TARGET).elf: $(TARGET).o module.o
-	$(CC) $(LDFLAGS) $(TARGET).o module.o $(SPRXCRT) -o $@
+imports.o: imports.S
+	$(CC) -c $< -o $@
+
+# module.o first: its export NIDs must precede the imports' NIDs in .rodata.sceFNID (see imports.S)
+$(TARGET).elf: $(TARGET).o module.o imports.o
+	$(CC) $(LDFLAGS) module.o imports.o $(TARGET).o $(SPRXCRT) -o $@
 
 $(TARGET).sprx: $(TARGET).elf
 	$(SPRX) $(TARGET).elf
 	$(FSELF) $(TARGET).elf $@
 
 clean:
-	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).sprx
+	rm -f $(TARGET).o module.o imports.o $(TARGET).elf $(TARGET).sprx
 
 .PHONY: all clean

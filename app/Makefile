@@ -23,14 +23,18 @@ BUILDDIR   := $(CURDIR)/build
 
 CFLAGS     := -O2 -Wall -mcpu=cell $(MACHDEP) $(LIBPSL1GHT_INC) -I../plugin -DOPENPAK_VERSION=\"$(APP_VERSION)\"
 LDFLAGS    := $(MACHDEP) -Wl,-Map,$(BUILDDIR)/$(TARGET).map $(LIBPSL1GHT_LIB)
-LIBS       := -lrsx -lgcm_sys -lio -lsysfs -lsysutil -lsysmodule -lrt -llv2 -lm
+LIBS       := -lnet -lrsx -lgcm_sys -lio -lsysfs -lsysutil -lsysmodule -lrt -llv2 -lm
 
-OBJS := build/main.o build/patcher.o
+OBJS := build/main.o build/patcher.o build/update.o build/update_core.o build/tweetnacl.o
 
 $(TARGET).elf: $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) $(LIBS) -o $@
 
-build/%.o: source/%.c source/patcher.h source/vshnames.h
+build/tweetnacl.o: source/vendor/tweetnacl.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) -w -c $< -o $@
+
+build/%.o: source/%.c source/patcher.h source/update_core.h source/vshnames.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 

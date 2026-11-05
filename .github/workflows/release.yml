@@ -44,6 +44,29 @@ jobs:
             sh -c "make -C app pkg APP_VERSION=${GITHUB_REF_NAME#v}"
           cp app/OpenPak-PS3-Patcher-${GITHUB_REF_NAME}.pkg .
 
+      - name: sign the update manifest (release-signing key from the Actions secret)
+        env:
+          RELEASE_KEY: ${{ secrets.PS3_RELEASE_SIGNING_KEY }}
+        run: |
+          set -eu
+          test -n "$RELEASE_KEY" || { echo "PS3_RELEASE_SIGNING_KEY is not set" >&2; exit 1; }
+          pkg=OpenPak-PS3-Patcher-${GITHUB_REF_NAME}.pkg
+          sum=$(sha256sum "$pkg" | cut -c1-64)
+          {
+            echo "type=openpak-ps3-patcher-release"
+            echo "version=${GITHUB_REF_NAME#v}"
+            echo "file=$pkg"
+            echo "size=$(stat -c %s "$pkg")"
+            echo "sha256=$sum"
+          } > manifest.txt
+          umask 077
+          printf '%s\n' "$RELEASE_KEY" > "$RUNNER_TEMP/rk.pem"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/rk.pem" -in manifest.txt | od -An -tx1 | tr -d ' \n' > manifest.sig
+          shred -u "$RUNNER_TEMP/rk.pem"
+          # the app's own verifier must accept what was just signed, under the key pinned in the app
+          cc -O2 -o "$RUNNER_TEMP/test_update" tools/test_update.c app/source/update_core.c app/source/vendor/tweetnacl.c
+          "$RUNNER_TEMP/test_update" manifest.txt manifest.sig "$sum"
+
       - name: bundle
         run: |
           mkdir -p out/dev_flash/data/cert
@@ -57,5 +80,7 @@ jobs:
         with:
           files: |
             OpenPak-PS3-Patcher-*.pkg
+            manifest.txt
+            manifest.sig
             ps3-patcher-*.zip
           fail_on_unmatched_files: true

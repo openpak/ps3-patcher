@@ -134,14 +134,27 @@ static int write_status(int applied, int verified, int total)
 #define SC_PEEK_LV2    6
 #define SC_PEEK_LV1    8     /* CFW / Cobra lv1 peek, as webMAN MOD's lv1_peek_cfw() */
 #define SC_POKE_LV1    9
-#define SC_THREAD_CREATE 52
-#define SC_THREAD_START  53
-#define SC_THREAD_EXIT   41
 #define SC_USLEEP        141
+
+/* Imported through imports.S (a proper PPU thread with TLS, and the vsh paf view lookups). */
+extern int sys_ppu_thread_create_(u64 *tid, void (*entry)(u64), u64 arg, int prio, u64 stacksize, u64 flags, const char *name);
+extern void sys_ppu_thread_exit_(u64 ret);
+extern void *paf_view_find(const char *name);
+extern void **paf_plugin_get_interface(void *view, int id);
 
 static volatile int g_run __attribute__((section(".data.rel.ro"))) = 1;     /* module_stop clears it; the thread then restores and exits */
 
 static void usleep_(unsigned long us) { sc8(SC_USLEEP, (long)us, 0, 0, 0, 0, 0, 0, 0); }
+
+static int strncmp_(const char *a, const char *b, int n)
+{
+	while (n-- > 0) {
+		if (*a != *b) return (unsigned char)*a - (unsigned char)*b;
+		if (!*a) return 0;
+		a++; b++;
+	}
+	return 0;
+}
 
 /* Two ways to reach lv1 memory, tried in this order (the same two webMAN MOD uses):
  *  0: Cobra PS3MAPI through syscall 8 (opcode 0x7777, LV1_PEEK 0x1008 / LV1_POKE 0x1009),
@@ -222,10 +235,64 @@ static int write_redirect_status(const char *state, const struct rd_state *st)
 	return write_file("/dev_hdd0/openpak/redirect.status", buf, n);
 }
 
+
+/* ---- silent self-update install (webMAN MOD's route) ----------------------------------------
+ * The Patcher app verifies a downloaded package, writes its path into UPDATE_REQ and exits to the
+ * XMB. From the XMB this thread installs it through vsh's game_ext_plugin installPKG, exactly as
+ * webMAN MOD does (include/feat/pkg_handler.h: LoadPluginById(game_ext_plugin, installPKG_thread),
+ * installPKG_thread: LoadPage(); installPKG(path)). webMAN refuses while a game runs, and so do we:
+ * the request stays until game_plugin is gone. The interfaces are tables of function pointers:
+ * xmb_plugin XMM0 (0x584D4D30) entry 3 = LoadPlugin3(id, handler, 0); game_ext_plugin interface 1
+ * entry 0 = LoadPage, entry 34 = installPKG(char *path). Result in UPDATE_ACK. */
+
+#define UPDATE_REQ "/dev_hdd0/openpak/update/install.req"
+#define UPDATE_ACK "/dev_hdd0/openpak/update/install.ack"
+
+static char g_pkg[256] __attribute__((section(".data.rel.ro")));
+
+static void install_handler(void)
+{
+	void **gx = paf_plugin_get_interface(paf_view_find("game_ext_plugin"), 1);
+	int r = -1;
+	if (gx) {
+		((int (*)(void))gx[0])();                  /* LoadPage */
+		r = ((int (*)(char *))gx[34])(g_pkg);      /* installPKG */
+		write_file(UPDATE_ACK, "started\n", 8);
+	} else {
+		write_file(UPDATE_ACK, "no game_ext interface\n", 22);
+	}
+	(void)r;
+}
+
+static void poll_install(void)
+{
+	int fd = -1, n;
+	unsigned long long got = 0;
+	void **xmm0;
+	char tmp[256];
+
+	if (sc4(801, (long)UPDATE_REQ, 0, (long)&fd, 0) != 0) return;   /* sys_fs_open read-only */
+	if (paf_view_find("game_plugin")) { sc4(804, fd, 0, 0, 0); return; }   /* a game runs: keep the request */
+	sc4(802, fd, (long)tmp, sizeof(tmp) - 1, (long)&got);           /* sys_fs_read */
+	sc4(804, fd, 0, 0, 0);
+	sc4(814, (long)UPDATE_REQ, 0, 0, 0);                            /* sys_fs_unlink */
+	n = (int)got;
+	if (n <= 0 || n >= (int)sizeof(tmp)) return;
+	tmp[n] = 0;
+	while (n > 0 && (tmp[n - 1] == '\n' || tmp[n - 1] == '\r' || tmp[n - 1] == ' ')) tmp[--n] = 0;
+	if (strncmp_(tmp, "/dev_hdd0/openpak/update/", 25) != 0) return;   /* only what the app staged */
+	for (n = 0; tmp[n] && n < (int)sizeof(g_pkg) - 1; n++) g_pkg[n] = tmp[n];
+	g_pkg[n] = 0;
+	xmm0 = paf_plugin_get_interface(paf_view_find("xmb_plugin"), 0x584D4D30);
+	if (!xmm0) { write_file(UPDATE_ACK, "no xmb interface\n", 17); return; }
+	((int (*)(int, void *, int))xmm0[3])(0x16, (void *)install_handler, 0);   /* LoadPlugin3(game_ext_plugin) */
+}
+
 /* Retry plugin.status until /dev_hdd0 accepts the write. */
 static void flush_status(void)
 {
 	if (g_pk[3] && write_status(g_pk[0], g_pk[1], g_pk[2]) == 0) g_pk[3] = 0;
+	poll_install();
 }
 
 /* The scan thread. Raw lv2 thread: no libc, no TLS, so it only uses its own stack, the raw
@@ -270,24 +337,14 @@ static void scan_thread(u64 arg)
 		rd_restore(&st);
 		write_redirect_status("restored", &st);
 	}
-	sc8(SC_THREAD_EXIT, 0, 0, 0, 0, 0, 0, 0, 0);
+	sys_ppu_thread_exit_(0);
 	for (;;) usleep_(1000000);
 }
 
-struct thread_param { u32 entry; u32 tls; };
-
 static int start_scan_thread(void)
 {
-	struct thread_param param;
 	u64 tid = 0;
-
-	param.entry = (u32)(u64)scan_thread;       /* the function descriptor (OPD) address */
-	param.tls = 0;
-	if (sc8(SC_THREAD_CREATE, (long)&tid, (long)&param, 0, 0, 3000, 0x10000, 0, (long)"OpenPak names") != 0)
-		return -1;
-	if (sc8(SC_THREAD_START, (long)tid, 0, 0, 0, 0, 0, 0, 0) != 0)
-		return -1;
-	return 0;
+	return sys_ppu_thread_create_(&tid, scan_thread, 0, 3000, 0x14000, 0, "OpenPak names") == 0 ? 0 : -1;
 }
 
 static void start_redirect(void)

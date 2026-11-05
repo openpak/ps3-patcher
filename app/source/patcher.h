@@ -64,6 +64,26 @@ bool op_switch_psn(char *err, int err_len);
  * raw return value, slot the slot used (-1 when none was free). */
 bool op_load_plugin(int *ret, int *slot);
 
+void logf_(const char *fmt, ...);
+
+/* ---- self-update (update.c) ---- */
+#include "update_core.h"
+#define OPENPAK_UPDATE_DIR  OPENPAK_DIR "/update"
+#define OPENPAK_UPDATE_REQ  OPENPAK_UPDATE_DIR "/install.req"
+#define OPENPAK_UPDATE_NOTE OPENPAK_DIR "/update.txt"
+
+/* Ask the update mirror for the newest release. True when a newer version than this app is
+ * available and its manifest signature verified; otherwise why says why (offline, current, ...). */
+bool op_update_check(up_manifest *m, char *why, int why_len);
+bool op_update_declined(const char *version);     /* the user already said no to this version */
+void op_update_decline(const char *version);
+/* Download, check size + sha256 against the signed manifest, and leave the package in
+ * OPENPAK_UPDATE_DIR. path receives its location. */
+bool op_update_fetch(const up_manifest *m, char *path, int path_len, char *err, int err_len);
+/* Hand the verified package to the plugin (installs from the XMB) when it is loaded; else copy it
+ * to /dev_hdd0/packages for the Package Manager. queued is true for the plugin route. */
+bool op_update_handoff(const char *path, bool plugin_loaded, bool *queued, char *msg, int msg_len);
+
 void op_reboot(void);
 
 #endif

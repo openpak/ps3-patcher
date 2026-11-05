@@ -37,7 +37,7 @@ static const char *const CA_NAMES[2] = { "CA01.cer", "CA59.cer" };
 
 /* ---- log -------------------------------------------------------------------------------- */
 
-static void logf_(const char *fmt, ...)
+void logf_(const char *fmt, ...)
 {
 	char line[320], msg[256];
 	va_list ap;
