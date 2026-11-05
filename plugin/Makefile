@@ -23,30 +23,48 @@ LDSCRIPT:= $(LIBDIR)/lv2.ld
 SPRXCRT := $(LIBDIR)/lv2-sprx.o
 
 TARGET  := openpak_ca
+TARGET_B:= openpak_cb
+MAKESELF:= make_self
 GEN     := openpak_ca_patch.h
 
 CFLAGS  := -O2 -Wall -fpic -ffreestanding -ffunction-sections
 LDFLAGS := -nostartfiles -fpic -Wl,-q -T $(LDSCRIPT)
 
-all: $(TARGET).sprx
+all: $(TARGET).sprx $(TARGET_B).sprx
 
+# Two SELF wrappers of the same module, because it is not known which one Cobra's VSH plugin loader
+# accepts: openpak_ca.sprx via PSL1GHT's fself (key revision 0x8000), openpak_cb.sprx via the
+# toolchain's make_self. Both are installed and listed in boot_plugins.txt; the app shows which ran.
 $(GEN):
 	@echo "run 'make stage' from the repo root first to generate $(GEN)"; exit 1
 
 $(TARGET).o: $(TARGET).c $(GEN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(TARGET_B).o: $(TARGET).c $(GEN)
+	$(CC) $(CFLAGS) -DOPENPAK_VARIANT=2 -c $< -o $@
+
 module.o: module.S
 	$(CC) -c $< -o $@
 
+module_b.o: module.S
+	$(CC) -DMODNAME='"openpak_cb"' -c $< -o $@
+
 $(TARGET).elf: $(TARGET).o module.o
 	$(CC) $(LDFLAGS) $(TARGET).o module.o $(SPRXCRT) -o $@
+
+$(TARGET_B).elf: $(TARGET_B).o module_b.o
+	$(CC) $(LDFLAGS) $(TARGET_B).o module_b.o $(SPRXCRT) -o $@
 
 $(TARGET).sprx: $(TARGET).elf
 	$(SPRX) $(TARGET).elf
 	$(FSELF) $(TARGET).elf $@
 
+$(TARGET_B).sprx: $(TARGET_B).elf
+	$(SPRX) $(TARGET_B).elf
+	$(MAKESELF) $(TARGET_B).elf $@
+
 clean:
-	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).sprx
+	rm -f $(TARGET).o module.o $(TARGET).elf $(TARGET).sprx $(TARGET_B).o module_b.o $(TARGET_B).elf $(TARGET_B).sprx
 
 .PHONY: all clean

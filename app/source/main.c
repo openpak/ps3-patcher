@@ -142,9 +142,12 @@ static void build_status(const op_status *s, char *out, size_t n)
 	char plug[64], redir[96], live[160], cobp[64];
 
 	if (!s->plugin_listed) snprintf(plug, sizeof(plug), "not installed");
-	else if (!s->plugin_ran) snprintf(plug, sizeof(plug), "installed, no status file yet");
-	else if (s->pokes_applied == s->pokes_total) snprintf(plug, sizeof(plug), "ran, %d/%d patches", s->pokes_applied, s->pokes_total);
-	else snprintf(plug, sizeof(plug), "ran, only %d/%d patches", s->pokes_applied, s->pokes_total);
+	else if (!s->plugin_ran && !s->plugin_b_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
+	else {
+		int a = s->plugin_ran ? s->pokes_applied : s->pokes_b_applied;
+		int t = s->plugin_ran ? s->pokes_total : s->pokes_b_total;
+		snprintf(plug, sizeof(plug), "loaded %d/%d (%s%s)", a, t, s->plugin_ran ? "A" : "", s->plugin_b_ran ? (s->plugin_ran ? "+B" : "B") : "");
+	}
 
 	if (!s->plugins_known) snprintf(cobp, sizeof(cobp), "query failed (see log)");
 	else if (s->plugin_loaded) snprintf(cobp, sizeof(cobp), "OpenPak loaded (slot %d)", s->plugin_slot);
@@ -175,9 +178,10 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 "Cobra: %s, HEN: %s\n"
 		 "stage2: %s\n"
 		 "Cobra plugins: %s\n"
-		 "Plugin file: %s\n"
+		 "Plugin: %s\n"
 		 "vsh now: %s\n"
 		 "Redirect: %s\n"
+		 "PS3MAPI: %s\n"
 		 "OpenPak CA: %s",
 		 OPENPAK_VERSION,
 		 on ? "OpenPak" : "PSN",
@@ -188,6 +192,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 plug,
 		 live,
 		 redir,
+		 s->ps3mapi_note[0] ? s->ps3mapi_note : "-",
 		 s->ca_openpak ? "installed" : "not installed");
 }
 

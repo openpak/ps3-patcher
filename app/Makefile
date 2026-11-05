@@ -36,12 +36,12 @@ build/%.o: source/%.c source/patcher.h source/vshnames.h
 
 # stage the package payload
 stage-pkg: $(TARGET).elf
-	@test -f ../plugin/openpak_ca.sprx || { echo "build the plugin first (make -C ../plugin)"; exit 1; }
+	@test -f ../plugin/openpak_ca.sprx -a -f ../plugin/openpak_cb.sprx || { echo "build the plugin first (make -C ../plugin)"; exit 1; }
 	@test -f ../dist/dev_flash/data/cert/CA01.cer || { echo "run make stage first"; exit 1; }
 	rm -rf $(PKGFILES)
 	mkdir -p $(PKGFILES)/USRDIR/ca
 	cp ../dist/dev_flash/data/cert/CA01.cer ../dist/dev_flash/data/cert/CA59.cer $(PKGFILES)/USRDIR/ca/
-	cp ../plugin/openpak_ca.sprx $(PKGFILES)/USRDIR/
+	cp ../plugin/openpak_ca.sprx ../plugin/openpak_cb.sprx $(PKGFILES)/USRDIR/
 
 pkg: stage-pkg $(TARGET).pkg
 	cp $(TARGET).pkg OpenPak-PS3-Patcher-v$(APP_VERSION).pkg

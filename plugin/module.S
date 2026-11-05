@@ -15,7 +15,10 @@
 openpak_module_info:
 	.short 0x0000              /* attributes */
 	.short 0x0101              /* version    */
-	.asciz "openpak_ca"        /* name[28]   */
+#ifndef MODNAME
+#define MODNAME "openpak_ca"
+#endif
+	.asciz MODNAME             /* name[28]   */
 	.space 28 - 11
 	.int 0                     /* toc base (loader uses the OPD TOC; 0 is fine with no imports) */
 	.int __libentstart

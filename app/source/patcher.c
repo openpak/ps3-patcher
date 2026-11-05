@@ -164,24 +164,34 @@ static void ensure_dirs(void)
 /* ---- boot_plugins.txt -------------------------------------------------------------------- */
 
 /* Is line [p, p+n) our plugin path (ignoring CR and surrounding blanks)? */
-static bool is_our_line(const unsigned char *p, size_t n)
+static bool is_line(const unsigned char *p, size_t n, const char *path)
 {
-	size_t want = strlen(OPENPAK_PLUGIN_DST);
+	size_t want = strlen(path);
 	while (n && (p[n - 1] == '\r' || p[n - 1] == ' ' || p[n - 1] == '\t')) n--;
 	while (n && (*p == ' ' || *p == '\t')) { p++; n--; }
-	return n == want && memcmp(p, OPENPAK_PLUGIN_DST, want) == 0;
+	return n == want && memcmp(p, path, want) == 0;
 }
 
-static bool list_has_ours(const unsigned char *buf, u64 len)
+static bool is_our_line(const unsigned char *p, size_t n)
+{
+	return is_line(p, n, OPENPAK_PLUGIN_DST) || is_line(p, n, OPENPAK_PLUGIN_DST_B);
+}
+
+static bool list_has_path(const unsigned char *buf, u64 len, const char *path)
 {
 	u64 i = 0;
 	while (i < len) {
 		u64 j = i;
 		while (j < len && buf[j] != '\n') j++;
-		if (is_our_line(buf + i, (size_t)(j - i))) return true;
+		if (is_line(buf + i, (size_t)(j - i), path)) return true;
 		i = j + 1;
 	}
 	return false;
+}
+
+static bool list_has_ours(const unsigned char *buf, u64 len)
+{
+	return list_has_path(buf, len, OPENPAK_PLUGIN_DST) || list_has_path(buf, len, OPENPAK_PLUGIN_DST_B);
 }
 
 static bool boot_list_add(void)
@@ -189,19 +199,23 @@ static bool boot_list_add(void)
 	u64 len = 0;
 	unsigned char *buf = NULL, *out;
 	bool ok;
+	const char *paths[2] = { OPENPAK_PLUGIN_DST, OPENPAK_PLUGIN_DST_B };
+	int k;
 
 	if (exists(OPENPAK_BOOT_LIST)) {
 		buf = read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len);
 		if (!buf) return false;
-		if (list_has_ours(buf, len)) { free(buf); return true; }
 	}
-	out = malloc(len + strlen(OPENPAK_PLUGIN_DST) + 4);
+	out = malloc(len + strlen(paths[0]) + strlen(paths[1]) + 8);
 	if (!out) { free(buf); return false; }
 	if (len) memcpy(out, buf, len);
-	if (len && out[len - 1] != '\n') out[len++] = '\n';
-	memcpy(out + len, OPENPAK_PLUGIN_DST, strlen(OPENPAK_PLUGIN_DST));
-	len += strlen(OPENPAK_PLUGIN_DST);
-	out[len++] = '\n';
+	for (k = 0; k < 2; k++) {
+		if (buf && list_has_path(buf, len, paths[k])) continue;
+		if (len && out[len - 1] != '\n') out[len++] = '\n';
+		memcpy(out + len, paths[k], strlen(paths[k]));
+		len += strlen(paths[k]);
+		out[len++] = '\n';
+	}
 	ok = write_atomic(OPENPAK_BOOT_LIST, out, len);
 	free(out);
 	free(buf);
@@ -341,6 +355,19 @@ static void detect_cfw(op_status *s)
  * GET_PROC_NAME_BY_PID 0x22, GET_PROC_MEM 0x31, GET_VSH_PLUGIN_INFO 0x47; load plugin is the Cobra
  * opcode 0x1EE7. Same calls as webMAN MOD's ps3mapi.h and cobra.c. */
 
+static char *g_note;   /* where the diagnostics are summarised for the status screen */
+static void note_add(const char *fmt, ...)
+{
+	va_list ap;
+	size_t n;
+	if (!g_note) return;
+	n = strlen(g_note);
+	if (n >= 150) return;
+	va_start(ap, fmt);
+	vsnprintf(g_note + n, 160 - n, fmt, ap);
+	va_end(ap);
+}
+
 /* Read-only diagnostics: what PS3MAPI answers and in which syscall 8 mode (0x94 only reads it). The
  * mode is logged, never changed: whether syscall 8 is restricted is a setting of the console's
  * owner (webMAN MOD's setup), not something this app overrides. */
@@ -356,9 +383,11 @@ static void ps3mapi_open(void)
 	s32 core = ps3mapi_sc(0x11, 0, 0, 0, 0);       /* GET_CORE_VERSION */
 	s32 mode = ps3mapi_sc(0x94, 0, 0, 0, 0);       /* PCHECK_SYSCALL8 (read only) */
 	logf_("ps3mapi: core version ret=0x%08x, syscall 8 restriction mode=%d", (unsigned)core, (int)mode);
+	note_add("core %08x mode %d", (unsigned)core, (int)mode);
 }
 
 static void ps3mapi_close(void) {}
+
 
 static int ps3mapi_vsh_pid(void)
 {
@@ -367,7 +396,7 @@ static int ps3mapi_vsh_pid(void)
 	int i;
 
 	memset(pids, 0, sizeof(pids));
-	{ s32 r; lv2syscall3(8, 0x7777, 0x21, (u64)(u32)(uintptr_t)pids); r = (s32)p1; logf_("ps3mapi: GET_ALL_PROC_PID ret=0x%08x pids %u %u %u %u", (unsigned)r, pids[0], pids[1], pids[2], pids[3]); }
+	{ s32 r; lv2syscall3(8, 0x7777, 0x21, (u64)(u32)(uintptr_t)pids); r = (s32)p1; logf_("ps3mapi: GET_ALL_PROC_PID ret=0x%08x pids %u %u %u %u", (unsigned)r, pids[0], pids[1], pids[2], pids[3]); note_add(", pids %08x", (unsigned)r); }
 	for (i = 0; i < 16; i++) {
 		if (pids[i] <= 1) continue;
 		memset(name, 0, sizeof(name));
@@ -435,6 +464,7 @@ static int plugin_slot_info(int slot, char *name, int nl, char *file, int fl)
 	memset(file, 0, fl);
 	{ lv2syscall5(8, 0x7777, 0x47, (u64)slot, (u64)(u32)(uintptr_t)name, (u64)(u32)(uintptr_t)file); r = (s32)p1; }
 	logf_("ps3mapi: GET_VSH_PLUGIN_INFO slot %d ret=0x%08x name='%s' file='%s'", slot, (unsigned)r, name, file);
+	if (slot <= 1) note_add(", slot%d %08x", slot, (unsigned)r);
 	return r;
 }
 
@@ -449,7 +479,7 @@ static void read_plugins(op_status *s)
 		if (slot == 0) s->plugins_known = (r == 0);
 		if (r != 0 || (!name[0] && !file[0])) continue;
 		logf_("cobra vsh plugin slot %d: name='%s' file='%s'", slot, name, file);
-		if (strstr(file, "openpak_ca")) { s->plugin_loaded = true; s->plugin_slot = slot; }
+		if (strstr(file, "openpak_c")) { s->plugin_loaded = true; s->plugin_slot = slot; }
 		else s->plugins_other++;
 	}
 }
@@ -489,6 +519,7 @@ void op_status_read(op_status *s)
 	u64 len;
 
 	memset(s, 0, sizeof(*s));
+	g_note = s->ps3mapi_note;
 	read_firmware(s);
 	detect_cfw(s);
 	logf_("firmware: %s known=%d ok=%d", s->fw, s->fw_known, s->fw_ok);
@@ -497,7 +528,7 @@ void op_status_read(op_status *s)
 	c1 = read_all(path, MAX_CERT, &l1);
 	snprintf(path, sizeof(path), "%s/ca/%s", OPENPAK_USRDIR, CA_NAMES[1]);
 	c2 = read_all(path, MAX_CERT, &l2);
-	s->bundle_ok = c1 && c2 && l1 && l2 && exists(OPENPAK_USRDIR "/openpak_ca.sprx");
+	s->bundle_ok = c1 && c2 && l1 && l2 && exists(OPENPAK_USRDIR "/openpak_ca.sprx") && exists(OPENPAK_USRDIR "/openpak_cb.sprx");
 
 	b1 = read_all(CERT_DIR "/CA01.cer", MAX_CERT, &n);
 	if (b1 && c1 && n == l1 && memcmp(b1, c1, n) == 0) {
@@ -570,6 +601,17 @@ void op_status_read(op_status *s)
 		read_plugins(s);
 		read_vsh_live(s);
 		ps3mapi_close();
+	}
+
+	st = read_all(OPENPAK_STATUS_B, 256, &len);
+	if (st) {
+		int a, v, t;
+		if (sscanf((char *)st, "applied=%d verified=%d total=%d", &a, &v, &t) == 3) {
+			s->plugin_b_ran = true;
+			s->pokes_b_applied = a;
+			s->pokes_b_total = t;
+		}
+		free(st);
 	}
 
 	snprintf(path, sizeof(path), "%s/%s", OPENPAK_BACKUP_DIR, CA_NAMES[0]);
@@ -685,6 +727,13 @@ bool op_switch_openpak(char *err, int err_len)
 
 	/* 2. plugin file and boot_plugins.txt line (before the CA: the plugin alone is harmless) */
 	if (!write_atomic(OPENPAK_PLUGIN_DST, sprx, sl)) FAIL("Could not install the plugin.");
+	{
+		u64 bl2 = 0;
+		unsigned char *bb = read_all(OPENPAK_USRDIR "/openpak_cb.sprx", 4 * 1024 * 1024, &bl2);
+		bool w = bb && bl2 && write_atomic(OPENPAK_PLUGIN_DST_B, bb, bl2);
+		free(bb);
+		if (!w) FAIL("Could not install the second plugin file.");
+	}
 	if (!boot_list_add()) FAIL("Could not update boot_plugins.txt.");
 	logf_("plugin installed, boot_plugins.txt updated");
 
@@ -761,6 +810,8 @@ bool op_switch_psn(char *err, int err_len)
 	}
 	if (!boot_list_remove()) FAIL("Could not update boot_plugins.txt.");
 	sysFsUnlink(OPENPAK_PLUGIN_DST);
+	sysFsUnlink(OPENPAK_PLUGIN_DST_B);
+	sysFsUnlink(OPENPAK_STATUS_B);
 	sysFsUnlink(OPENPAK_STATUS);
 	sysFsUnlink(OPENPAK_REDIRECT_STATUS);
 	sysFsUnlink(OPENPAK_INSTALLED);

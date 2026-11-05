@@ -34,6 +34,20 @@
 
 #include "openpak_ca_patch.h"
 
+/* Two builds of this module differ only in the SELF wrapper (see plugin/Makefile) and in the names of
+ * the files they report to, so a console shows which wrapper Cobra accepts. Both run the same code;
+ * the second finds the work already done (pokes already applied, names already rewritten). */
+#ifndef OPENPAK_VARIANT
+#define OPENPAK_VARIANT 1
+#endif
+#if OPENPAK_VARIANT == 1
+#define STATUS_PATH "/dev_hdd0/openpak/plugin.status"
+#define REDIR_PATH "/dev_hdd0/openpak/redirect.status"
+#else
+#define STATUS_PATH "/dev_hdd0/openpak/plugin.b.status"
+#define REDIR_PATH "/dev_hdd0/openpak/redirect.b.status"
+#endif
+
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
@@ -119,9 +133,9 @@ static int write_status(int applied, int verified, int total)
 		buf[n++] = (k == 2) ? '\n' : ' ';
 	}
 	/* sys_fs_open(path, O_WRONLY|O_CREAT|O_TRUNC, &fd, mode 0666, NULL, 0) */
-	if (sc4(801, (long)"/dev_hdd0/openpak/plugin.status", 0x241, (long)&fd, 0666) != 0) {
+	if (sc4(801, (long)STATUS_PATH, 0x241, (long)&fd, 0666) != 0) {
 		sc4(811, (long)"/dev_hdd0/openpak", 0777, 0, 0);   /* sys_fs_mkdir, then once more */
-		if (sc4(801, (long)"/dev_hdd0/openpak/plugin.status", 0x241, (long)&fd, 0666) != 0)
+		if (sc4(801, (long)STATUS_PATH, 0x241, (long)&fd, 0666) != 0)
 			return -1;
 	}
 	sc4(803, fd, (long)buf, n, (long)&wrote);   /* sys_fs_write */
@@ -219,7 +233,7 @@ static int write_redirect_status(const char *state, const struct rd_state *st)
 		n = put_str(buf, n, openpak_names[k].from);
 		buf[n++] = '\n';
 	}
-	return write_file("/dev_hdd0/openpak/redirect.status", buf, n);
+	return write_file(REDIR_PATH, buf, n);
 }
 
 /* Retry plugin.status until /dev_hdd0 accepts the write. */
@@ -312,6 +326,9 @@ static void apply_pokes(void)
 			verified++;
 			write_u32(openpak_u32_pokes[i].addr, openpak_u32_pokes[i].val);
 			applied++;
+		} else if (read_u32(openpak_u32_pokes[i].addr) == openpak_u32_pokes[i].val) {
+			verified++;       /* the other build of this plugin got there first */
+			applied++;
 		}
 	}
 
@@ -322,6 +339,9 @@ static void apply_pokes(void)
 		verified++;
 		for (i = 0; i < 6; i++)
 			write_u32(OPENPAK_CN_STRING_ADDR + i * 4, openpak_cn_words[i]);
+		applied++;
+	} else if (read_u32(OPENPAK_CN_STRING_ADDR) == openpak_cn_words[0]) {
+		verified++;
 		applied++;
 	}
 #endif

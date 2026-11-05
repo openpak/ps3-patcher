@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.9
+
+- v0.2.8 on hardware: the plugin never ran from boot_plugins.txt. Cause candidate: the SELF wrapper.
+  Every VSH plugin known to load under Cobra is a signed or Sony-SDK-made SELF (webMAN MOD: key
+  revision 0x0A; Akari: 0x0004, `0x240` header); ours was PSL1GHT `fself` (revision 0x8000, `0x410`
+  header). Akari's metadata and sections are encrypted, so that layout cannot be generated without
+  keys; this release instead ships the same plugin in two wrappers and installs both:
+  `openpak_ca.sprx` (fself) and `openpak_cb.sprx` (the toolchain's `make_self`, key revision 1,
+  `0x3f0` header). Both are listed in boot_plugins.txt; each reports to its own status files, and the
+  second finds the pokes already applied. The status screen shows `Plugin: loaded 3/3 (A, B or A+B)`:
+  which wrapper Cobra accepted. Switching back removes both.
+- The status screen shows the raw PS3MAPI answers (core version, syscall 8 restriction mode, process
+  list, plugin slots 0 and 1) on a `PS3MAPI:` line, so they can be photographed. The mode is read, not changed.
+- Includes the v0.2.8 update-available flow.
+
 ## v0.2.8
 
 - Update flow on launch: the app compares the installed setup with what it carries (version marker
