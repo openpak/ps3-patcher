@@ -159,7 +159,7 @@ static void ask_pages(const char *text)
 static void build_status(const op_status *s, char *out, size_t n)
 {
 	bool on = op_is_openpak(s);
-	char plug[64], redir[160], live[160], cobp[64];
+	char plug[64], catch[200], live[160], cobp[64];
 
 	if (!s->plugin_listed) snprintf(plug, sizeof(plug), "not installed");
 	else if (!s->plugin_ran && !s->plugin_c_ran && !s->plugin_d_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
@@ -173,24 +173,20 @@ static void build_status(const op_status *s, char *out, size_t n)
 	else if (s->plugin_loaded) snprintf(cobp, sizeof(cobp), "OpenPak loaded (slot %d)", s->plugin_slot);
 	else snprintf(cobp, sizeof(cobp), "OpenPak NOT loaded (%d others)", s->plugins_other);
 
-	if (!s->plugin_listed) snprintf(redir, sizeof(redir), "off");
-	else if (s->live_names_rewritten > 0 && !s->redirect_ran)
-		snprintf(redir, sizeof(redir), "%d names in vsh", s->live_names_rewritten);
-	else if (!s->redirect_ran) snprintf(redir, sizeof(redir), "not run yet");
-	else if (!strcmp(s->redirect_state, "ok") || !strcmp(s->redirect_state, "hen"))
-		snprintf(redir, sizeof(redir), "%d names%s; modules %d scanned, %d names%s", s->redirect_names,
-			 s->redirect_failed ? " (some did not verify, see log)" : "",
-			 s->redirect_mods, s->redirect_modhits,
-			 s->redirect_segerr > 0 ? " (segments not readable, see log)" : "");
-	else if (!strcmp(s->redirect_state, "nolv2")) snprintf(redir, sizeof(redir), "unavailable (lv1 memory not reachable)");
-	else if (!strcmp(s->redirect_state, "nothread")) snprintf(redir, sizeof(redir), "unavailable (thread did not start)");
-	else snprintf(redir, sizeof(redir), "%s", s->redirect_state);
+	if (!s->plugin_listed) snprintf(catch, sizeof(catch), "off (not installed)");
+	else if (!s->catcher_ran) snprintf(catch, sizeof(catch), "not run yet");
+	else if (!strcmp(s->catcher_state, "on"))
+		snprintf(catch, sizeof(catch), "on (list %s v%d, %d families), %u caught, %u passed",
+			 s->catcher_verified[0] ? s->catcher_verified : "bundled", s->catcher_version,
+			 s->catcher_families, s->catcher_caught, s->catcher_passed);
+	else
+		snprintf(catch, sizeof(catch), "%s", s->catcher_state);   /* "off - <reason>" */
 
 	if (!s->vsh_found) snprintf(live, sizeof(live), "vsh not found");
-	else snprintf(live, sizeof(live), "pokes %d/%d, CN %s, names redirected %d, original %d, of %d",
+	else snprintf(live, sizeof(live), "pokes %d/%d, CN %s, Qhook %s",
 		      s->live_poke_patched, s->live_poke_total,
 		      s->live_cn_known ? (s->live_cn_patched ? "yes" : "no") : "?",
-		      s->live_names_rewritten, s->live_names_orig, s->live_names_total);
+		      s->live_qhook ? "installed" : "default");
 
 	snprintf(out, n,
 		 "OpenPak PS3 Patcher %s\n\n"
@@ -201,7 +197,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 "Cobra plugins: %s\n"
 		 "Plugin: %s\n"
 		 "vsh now: %s\n"
-		 "Redirect: %s\n"
+		 "DNS catcher: %s\n"
 		 "PS3MAPI: %s\n"
 		 "OpenPak CA: %s",
 		 OPENPAK_VERSION,
@@ -212,7 +208,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 cobp,
 		 plug,
 		 live,
-		 redir,
+		 catch,
 		 s->ps3mapi_note[0] ? s->ps3mapi_note : "-",
 		 s->ca_openpak ? "installed" : "not installed");
 }
@@ -319,6 +315,10 @@ int main(int argc, char **argv)
 		} else {
 			ask(false, "OpenPak selected.\n\nRestart the console, then sign in under PlayStation "
 				    "Network with your OpenPak email and password. Keep the network DNS on Automatic.");
+			ask(false, "If anything goes wrong: the console still reaches the XMB (the DNS catcher "
+				    "only acts on a lookup, never during boot). Open this app and choose "
+				    "\"Switch back to PSN\", or delete /dev_hdd0/boot_plugins.txt over FTP, then "
+				    "restart. A restart alone also puts the original resolver back.");
 			if (ask(true, "Restart the console now?")) { op_reboot(); sleep(10); }
 		}
 	}

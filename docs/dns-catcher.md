@@ -34,40 +34,83 @@ synchronous `gethostbyname` (libnet NID `0x71f4c717`) and the async `cellNetDbRe
 
 ### vsh.self 4.93 CEX addresses (verified against the decrypted image)
 
-`scratch/pier/analysis/vsh/vsh.elf`, segment 0 loaded at `0x10000`:
+`scratch/pier/analysis/vsh/vsh.elf`, segment 0 loaded at `0x10000`. The `res_send` here is byte-for-byte
+the same routine as `libnet.sprx`'s `res_send` (its hook-call block matched exactly), so this is the
+real resolver, not a sibling:
 
-| what | address | bytes |
+| what | address | value |
 | --- | --- | --- |
-| `res_send_setqhook`: `lwz r9,-30940(r2); stw r3,0(r9); blr` | `0x59ee94` | `81 22 87 24  90 69 00 00  4e 80 00 20` |
-| `res_send` Qhook call: `lwz r9,-30940(r2); lwz r9,0(r9); lwz r0,0(r9); …; bctrl` | `0x5a03b8` | `81 22 87 24 … 4e 80 04 21` |
-| vsh TOC base (from the vsh entry OPD `0x6d5ac8`) | `0x6f5558` | — |
-| Qhook pointer cell = `*(TOC-30940)` = `*(0x6edc7c)` | `0x704198` | `0` at boot |
+| `res_send`, hook read: `lwz r27,-28712(r2)` | `0x164c0` | `0x83628fd8` |
+| next: `lwz r0,0(r27)` | `0x164c4` | `0x801b0000` |
+| hook OPD read: `lwz r0,0(r9)` | `0x1650c` | `0x80090000` |
+| hook call: `bctrl` | `0x16528` | `0x4e800421` |
+| `res_done` branch: `bt 30,…` | `0x16550` | `0x419e0854` |
+| `res_done` tail | `0x16da4` | `0x4bfff189` |
+| TOC slot `*(TOC-28712)` → Qhook cell address | `0x6ee530` | `0x00706f1c` |
+| **Qhook cell** (holds a pointer to the active hook's 8-byte OPD) | `0x706f1c` | `0x006e9480` at boot |
+| firmware default hook OPD `{entry, toc}` | `0x6e9480` | `0x00017784`, `0x006f5558` |
 
-The install is: build a guest 8-byte `{entry, toc}` descriptor for the plugin's `qhook`, then store
-its address at `0x704198` in the vsh process (through PS3MAPI `SET_PROC_MEM`, like the CA pokes).
-`res_send` then calls it for every query.
+Important: the cell is **not** zero at boot — the firmware installs its own default qhook (OPD
+`0x6e9480`). So the install is a **chain**, not a bare set:
 
-The standalone `libnet.sprx` carries the same `res_send` (its own copy of these bytes at text
-`+0x9980`, setqhook at `+0x9464`, Qhook cell at data `+0x544`); a game process that resolves through
-`libnet` is covered the same way once its module is seen.
+1. verify all nine values above;
+2. save the current cell value (`0x6e9480`);
+3. write the address of the plugin's own 8-byte `{entry, toc}` descriptor (`openpak_opd_qhook`,
+   module.S) into the cell `0x706f1c` via PS3MAPI `SET_PROC_MEM`.
+
+`res_send` then calls the plugin's `qhook` for every query. For a non-matching name the plugin's
+hook calls the saved original (`0x6e9480`) through an 8-byte-descriptor trampoline
+(`openpak_call_qhook`, module.S) and returns its result, so pass-through behaviour is exactly stock.
+`module_stop` and any reboot restore `0x706f1c` to `0x6e9480`.
+
+(The separate `res_send_setqhook`/`setrhook` pair at `0x59ee94`/`0x59eea0` writes a different,
+unused cell `0x704198` = 0; it is not the active resolver's hook and is left alone.)
 
 ### Safety / never hang at boot
 
-Every constant above is checked before the install: the exact instruction words at `0x59ee94`,
-`0x5a03b8` and the surrounding bytes must match, the TOC must be `0x6f5558`, the cell must resolve to
-`0x704198`, and that cell must still be `0` (no other qhook installed). If any check fails the hook
-is **not** installed — the patcher no-ops and sign-in fails cleanly rather than risking a vsh hang.
-Re-derive the addresses before enabling it on any other firmware.
+The install only *writes a pointer*; it never runs hook code at boot. The plugin's `qhook` is first
+executed later, when the network stack performs a DNS lookup (STUN/console-info at the XMB, then
+sign-in) — long after boot. So a wrong hook cannot block the boot itself; at worst a lookup misbehaves
+while the XMB is already up and reachable.
+
+The install is fully guarded: all nine values above must match, including the TOC slot resolving to
+`0x706f1c` and the cell still holding the known default `0x6e9480`. If anything is off the hook is
+left out and the status screen says `DNS catcher: off - <reason>` (`res_send not 4.93`,
+`hook slot moved`, `default hook changed`, `another hook present`, `install write failed`,
+`vsh not found`). Re-derive the addresses before enabling it on any other firmware.
+
+### Recovery if a build misbehaves (verified, no XMB needed)
+
+The plugin loads only because its line is in `/dev_hdd0/boot_plugins.txt`, and a reboot restores the
+original resolver hook regardless. To stop it:
+
+- **From the XMB** (it always reaches the XMB — see above): open the OpenPak Patcher and choose
+  **Switch back to PSN**, which removes the `openpak_ca.sprx` line from `boot_plugins.txt` and the
+  CA, then reboot. Or delete `/dev_hdd0/boot_plugins.txt` with any FTP homebrew and reboot.
+- **Cobra/Evilnat recovery:** the console's **Recovery Menu / Safe Mode** (power off, then hold Power
+  ~5 s until the second beep, release, press again) boots a minimal system that runs independently of
+  the normal XMB VSH process, so it is reachable even if the XMB is unhappy; from there restore/exit
+  returns to a normal boot where the file can be removed over FTP. Verified behaviour: Cobra loads
+  `boot_plugins.txt` for the normal XMB only.
+
+Because the hook never executes during boot and `module_stop`/reboot restore the original pointer,
+there is no state that survives a reboot without `boot_plugins.txt` naming the plugin.
 
 ## The list
 
-Same signed platform bundle and ceiling the Switch uses, with a `ps3` profile. Source order:
-fetched copy, then the bundled copy, then the compiled fallback. The live platform map is
-`deploy/netprofile-platforms.yml` on the box; the `ps3` families are
+Same signed platform bundle and ceiling the Switch uses, with a `ps3` profile. The `ps3` families are
 `.playstation.net .playstation.com .playstation.org .sonyentertainmentnetwork.com`, which cover the
-whole 4.93 firmware host inventory (see `firmware-hosts-4.93.md`). Refresh at boot, every 6 h and on
-reconnect; a failed fetch keeps the last good list and never shrinks to the fallback while a cached
-copy exists.
+whole 4.93 firmware host inventory (see `firmware-hosts-4.93.md`).
+
+**v0.2.17 ships a bundled list verified at build time.** `tools/stage.sh` fetches the signed ceiling
+(`GET /api/v1/network/ceiling`), verifies its Ed25519 signature against the pinned key on the build
+host, intersects the `ps3` profile families with the verified ceiling, and emits `plugin/catchlist.h`
+(`OPENPAK_LIST_VERIFIED "build"`). The build refuses to bundle a family the signed ceiling does not
+allow. The screen shows this as `list build v<N>`.
+
+**v0.2.18 (next) moves this onto the console:** the ed25519 verify at load, the boot/6-hour/reconnect
+re-fetch, apply-live, and the cached-list-never-shrinks-to-fallback rule, with source order fetched →
+bundled → compiled fallback. Tracked on card openpak/prds#125.
 
 ## The catcher core (`plugin/catcher.h`)
 

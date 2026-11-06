@@ -28,10 +28,10 @@ jobs:
       - name: stage (fetch the pinned CA, generate the poke header)
         run: make stage
 
-      - name: test the name rewrite (host build, fake memory)
+      - name: test the DNS catcher core (host build)
         run: |
-          cc -O2 -Wall -Iplugin -o "$RUNNER_TEMP/test_redirect" tools/test_redirect.c
-          "$RUNNER_TEMP/test_redirect"
+          cc -O2 -Wall -Wextra -o "$RUNNER_TEMP/test_catcher" tools/test_catcher.c
+          "$RUNNER_TEMP/test_catcher"
 
       - name: build the VSH plugin (PSL1GHT container)
         run: |

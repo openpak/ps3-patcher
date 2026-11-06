@@ -20,7 +20,8 @@
 #define OPENPAK_PLUGIN_LOG OPENPAK_DIR "/plugin.log"   /* written by the plugin: step trace */
 #define OPENPAK_DIAG       OPENPAK_DIR "/diag.txt"
 #define OPENPAK_INSTALLED  OPENPAK_DIR "/installed.txt"
-#define OPENPAK_REDIRECT_STATUS OPENPAK_DIR "/redirect.status"
+#define OPENPAK_CATCHER_STATUS  OPENPAK_DIR "/catcher.status"
+#define OPENPAK_CATCHER_LOG     OPENPAK_DIR "/catcher.caught.log"
 
 typedef struct {
 	char fw[16];          /* "4.93" */
@@ -44,15 +45,18 @@ typedef struct {
 	char log[4000];       /* the whole plugin.log (last 3.9 KB), shown page by page */
 	char detail[2300];    /* the details page: PS3MAPI, every slot, boot list, file checks, last load */
 	char ps3mapi_note[160];   /* raw PS3MAPI answers, for the status screen */
-	bool redirect_ran;    /* redirect.status written by this boot's plugin */
-	char redirect_state[16];  /* ok | hen | nolv2 | nothread | restored */
-	int  redirect_names, redirect_of, redirect_live, redirect_passes, redirect_failed;
-	int  redirect_mods, redirect_modhits, redirect_segerr;   /* -1: plugin older than v0.2.16 */
+	bool catcher_ran;         /* catcher.status written by this boot's plugin */
+	char catcher_state[48];   /* "on" | "off - <reason>" | "not run yet" | "restored" */
+	int  catcher_version;     /* bundled signed-list version */
+	char catcher_verified[12];/* where the list was verified: "build" (v0.2.17) */
+	int  catcher_families;    /* entries on the list */
+	unsigned catcher_caught, catcher_passed;   /* lookups caught / passed through */
+	char catcher_ip[20];      /* the answer address the catcher gives matching names */
 	bool vsh_found;       /* PS3MAPI found the vsh process */
 	int  vsh_pid;
 	int  live_poke_patched, live_poke_orig, live_poke_total;  /* the u32 pokes, read from vsh memory */
 	bool live_cn_known, live_cn_patched;                      /* the pinned CN string field */
-	int  live_names_total, live_names_rewritten, live_names_orig;  /* static PSN names in vsh */
+	bool live_qhook;      /* the res_send Qhook cell points at our descriptor right now */
 	bool plugins_known;   /* PS3MAPI answered the VSH plugin query */
 	bool plugin_loaded;   /* Cobra has openpak_ca.sprx in a VSH plugin slot */
 	int  plugin_slot;

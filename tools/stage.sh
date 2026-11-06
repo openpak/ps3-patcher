@@ -110,47 +110,91 @@ echo "staged dist/dev_flash/data/cert/{CA01,CA59}.cer and plugin/openpak_ca_patc
 [ "$skip_cn" -eq 1 ] && echo "note: CN matches the stock pin -> only the file-content poke is needed"
 echo "poke table: dist/poke-table.txt"
 
-# ---- name rewrite table ---------------------------------------------------------------------
-# names/psn-names.txt is the bundled list; NAMES_EXTRA=<file> appends more entries of the same
-# shape (this is where the network's single signed redirect list plugs in). Replacement must be
-# exactly as long as the match: the plugin overwrites in place and never moves bytes.
-NAMES="$D/names/psn-names.txt"
-python3 -I - "$NAMES" "${NAMES_EXTRA:-}" "$D/plugin/openpak_names.h" "$D/dist/redirect-names.txt" <<'PY'
-import sys
-out = []
-for path in sys.argv[1:3]:
-    if not path:
+# ---- DNS-catcher list (signed) --------------------------------------------------------------
+# The catcher list bundled in the pkg: the ps3 profile's redirect families/exacts/nevers plus the
+# box address, but only after the SIGNED ceiling (GET /api/v1/network/ceiling) is verified here, at
+# build time, with the pinned Ed25519 key -- and every family is intersected with the verified
+# ceiling, so the build cannot bundle a family the ceiling does not allow. v0.2.18 moves this
+# verify + fetch + 6h/reconnect refresh onto the console; v0.2.17 ships this verified-at-build list
+# (CATCHER_VERIFIED=build in the header). Set CEILING_URL/PROFILE_URL to override the origins.
+: "${CEILING_URL:=https://openpak.org/api/v1/network/ceiling}"
+ceil=$(curl -fsS "$CEILING_URL")
+prof=${profile:-$(curl -fsS "$PROFILE_URL")}
+printf '%s' "$ceil" > "$D/dist/ceiling.json"
+printf '%s' "$prof" > "$D/dist/profile-ps3.json"
+python3 -I - "$D/dist/ceiling.json" "$D/dist/profile-ps3.json" "$D/plugin/catchlist.h" <<'PY'
+import sys, json, base64
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.exceptions import InvalidSignature
+
+# Pinned ceiling key (docs/signed-ceiling.md). A list, so a successor can be added before retiring one.
+PINNED = {
+    "36e8bcdd93c2c1a1d7e5d87bbba05a7a4f97882131cf6878f1c053a25a377fe4":
+        bytes.fromhex("0fd2a2660868e53d20fc811e3f15710cb1ad157ba7da8019f7a59e8ad604d87c"),
+}
+
+env = json.load(open(sys.argv[1]))
+payload = base64.b64decode(env["payload"])
+ok = False
+for s in env.get("signatures", []):
+    pk = PINNED.get(s.get("keyid"))
+    if not pk:
         continue
-    for ln, line in enumerate(open(path, encoding="ascii"), 1):
-        line = line.rstrip("\n")
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        cols = line.split("\t")
-        if len(cols) != 2:
-            sys.exit("%s:%d: want <match> TAB <replace>" % (path, ln))
-        m, r = cols
-        if len(m) != len(r):
-            sys.exit("%s:%d: replacement must be the same length as the match (%d vs %d): %s" % (path, ln, len(m), len(r), m))
-        if not (4 <= len(m) <= 40):
-            sys.exit("%s:%d: match length must be 4..40" % (path, ln))
-        if m == r:
-            sys.exit("%s:%d: match equals replacement" % (path, ln))
-        if (m, r) not in out:
-            out.append((m, r))
-if not out:
-    sys.exit("no name entries")
+    try:
+        Ed25519PublicKey.from_public_bytes(pk).verify(base64.b64decode(s["sig"]), payload)
+        ok = True
+        break
+    except InvalidSignature:
+        pass
+if not ok:
+    sys.exit("ceiling signature did not verify against any pinned key -- refusing to bundle a list")
+
+cj = json.loads(payload)
+if cj.get("type") != "openpak-ceiling":
+    sys.exit("ceiling type is not openpak-ceiling")
+version = int(cj["version"])
+ceiling = [f.lower() for f in cj.get("platforms", {}).get("ps3", [])]
+
+def covered(name):
+    n = "." + name.lstrip(".")
+    return any(n == f or n.endswith(f) for f in ceiling)
+
+pj = json.loads(open(sys.argv[2], "rb").read())
+if pj.get("platform") != "ps3":
+    sys.exit("profile is not a ps3 profile")
+ip = pj["server"]["address"]
+oct_ = ip.split(".")
+if len(oct_) != 4:
+    sys.exit("server address is not IPv4: %s" % ip)
+red = pj.get("redirect", {})
+entries = []  # (kind, name)   kind 0 family, 1 exact, 2 never
+dropped = []
+for f in red.get("suffixes", []):
+    (entries if covered(f) else dropped).append((0, f.lstrip(".").lower()))
+for f in red.get("exact", []):
+    (entries if covered(f) else dropped).append((1, f.lower()))
+for f in red.get("never", []):
+    entries.append((2, f.lower()))
+entries = [(k, n) for (k, n) in entries if isinstance(n, str)]
+# keep only the ones that actually passed the ceiling (dropped holds (kind,name) tuples)
+entries = [e for e in entries if e not in dropped]
+if not any(k in (0, 1) for k, _ in entries):
+    sys.exit("no ps3 redirect family survived the ceiling")
+
 def c(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 with open(sys.argv[3], "w") as h:
-    h.write("/* Generated by tools/stage.sh from names/psn-names.txt -- do not edit. */\n")
-    h.write("#ifndef OPENPAK_NAMES_H\n#define OPENPAK_NAMES_H\n")
-    h.write("#define OPENPAK_NAMES_N %d\n" % len(out))
-    h.write("static const struct { const char *from, *to; unsigned char len; } openpak_names[OPENPAK_NAMES_N] = {\n")
-    for m, r in out:
-        h.write("\t{ %s, %s, %d },\n" % (c(m), c(r), len(m)))
+    h.write("/* Generated by tools/stage.sh -- do not edit. Signed ceiling v%d verified at build. */\n" % version)
+    h.write("#ifndef OPENPAK_CATCHLIST_H\n#define OPENPAK_CATCHLIST_H\n")
+    h.write("#define OPENPAK_LIST_VERSION %d\n" % version)
+    h.write("#define OPENPAK_LIST_VERIFIED \"build\"   /* v0.2.18: verify + fetch on the console */\n")
+    h.write("#define OPENPAK_LIST_IP0 %s\n#define OPENPAK_LIST_IP1 %s\n#define OPENPAK_LIST_IP2 %s\n#define OPENPAK_LIST_IP3 %s\n" % tuple(oct_))
+    h.write("#define OPENPAK_LIST_N %d\n" % len(entries))
+    h.write("static const struct { int kind; const char *name; } openpak_catch[OPENPAK_LIST_N] = {\n")
+    for k, n in entries:
+        h.write("\t{ %d, %s },\n" % (k, c(n)))
     h.write("};\n#endif\n")
-with open(sys.argv[4], "w") as t:
-    for m, r in out:
-        t.write("%s\t%s\n" % (m, r))
+print("ceiling v%d verified; bundled %d ps3 entries -> %s, dropped %d outside the ceiling" %
+      (version, len(entries), "145..." if ip.startswith("145") else ip, len(dropped)))
 PY
-echo "staged plugin/openpak_names.h ($(grep -c '^	{' "$D/plugin/openpak_names.h") name entries)"
+echo "staged plugin/catchlist.h"

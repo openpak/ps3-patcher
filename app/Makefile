@@ -30,7 +30,7 @@ OBJS := build/main.o build/patcher.o
 $(TARGET).elf: $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) $(LIBS) -o $@
 
-build/%.o: source/%.c source/patcher.h source/vshnames.h
+build/%.o: source/%.c source/patcher.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 

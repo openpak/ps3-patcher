@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.2.17
+
+- **DNS-catcher pivot.** The patcher is now the PS3's dns_mitm, like the Switch patcher. Instead of
+  rewriting PSN host strings in vsh memory (v0.2.6..v0.2.16, which never worked on hardware), it installs
+  a `res_send` query hook in the vsh process: a name matching a family on the signed `ps3` list is
+  answered with the OpenPak box address, every other name is passed to the console's own DNS unchanged.
+  The console's DNS setting is never changed, so the owner's LAN names are untouched. RE and the exact
+  4.93 CEX addresses: `docs/dns-catcher.md`; firmware host inventory: `docs/firmware-hosts-4.93.md`.
+- **Chokepoint.** BIND `res_send` (statically linked in vsh.self, 0x164c0 on 4.93 CEX) calls the function
+  in its Qhook cell (0x706f1c) before each query. Both `gethostbyname` and the async resolver reach it, so
+  one hook covers sign-in and everything else. Proven on Pier (OpenPak's RPCS3 fork) with the console DNS
+  set to plain upstream: PSN family names caught -> box, other names resolved upstream.
+- **Guarded install, never hangs at boot.** The install verifies nine `res_send` words (signature, TOC
+  slot, the Qhook cell's firmware default 0x6e9480 and the default OPD) and only then stores one pointer,
+  chaining to the saved firmware hook for pass-through names. The hook is a pointer written at boot and
+  only run on a later lookup, so a wrong firmware can only no-op, never block boot. `module_stop` and any
+  reboot restore the original Qhook pointer.
+- **Signed list, verified at build.** `tools/stage.sh` fetches the signed ceiling, verifies its Ed25519
+  signature against the pinned key on the build host, intersects the `ps3` profile families with it, and
+  bundles `plugin/catchlist.h` (v18: `.playstation.net/.com/.org`, `.sonyentertainmentnetwork.com`). The
+  on-console verify + boot/6h/reconnect re-fetch is v0.2.18.
+- **Screen.** "DNS catcher: on (list build v18, 4 families), M caught, K passed" or "off - <reason>".
+  Caught names are logged (`/dev_hdd0/openpak/catcher.caught.log`); passed names are only counted.
+- **Removed** the string-rewrite, lv1/lv2 memory walk, module-scan and vsh-name-table code
+  (`plugin/redirect.h`, `plugin/openpak_names.h`, `app/source/vshnames.h`, `names/`,
+  `tools/test_redirect.c`). The CA install and the three trust pokes are unchanged.
+- Recovery for a bad build is shown on screen after "Switch to OpenPak" and documented in
+  `docs/dns-catcher.md`.
+
 ## v0.2.16
 
 - v0.2.15 on hardware: pokes 3/3, 20 of 32 vsh names rewritten, yet PSN sign-in still reached Sony (its
