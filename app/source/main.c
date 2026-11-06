@@ -332,6 +332,25 @@ static bool steps(void)
 				return false;
 			}
 		} else {
+			if (ask(true, "The XMB shows \"PlayStation Network: Disabled\"?\n\nThis sets OpenPak to hide "
+				      "the CFW peek/poke syscalls from Evilnat's check after boot, while keeping syscall 8. "
+				      "Try it for the next boot (mode 3, reversible)?")) {
+				if (!op_set_syscall_mode(3, err, sizeof(err))) ask(false, err);
+				else ask(false, "Set. Restart, wait about a minute, then check the PSN column. If it is still "
+						"Disabled, come back and try mode 2. To undo, choose \"Stop hiding syscalls\".");
+				if (ask(true, "Restart now?")) { op_reboot(); sleep(10); }
+				return false;
+			}
+			if (ask(true, "Try mode 2 (keep only PS3MAPI/syscall 8) for the next boot?")) {
+				if (!op_set_syscall_mode(2, err, sizeof(err))) ask(false, err);
+				else { ask(false, "Set to mode 2. Restart and check the PSN column."); if (ask(true, "Restart now?")) { op_reboot(); sleep(10); } }
+				return false;
+			}
+			if (ask(true, "Stop hiding syscalls (clear the setting)?")) {
+				if (!op_set_syscall_mode(0, err, sizeof(err))) ask(false, err);
+				else ask(false, "Cleared. Restart to restore normal syscalls.");
+				return false;
+			}
 			if (ask(true, "OpenPak is enabled at boot. Turn it off (rename boot_plugins.txt to "
 				      "boot_plugins.off)?")) {
 				if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);

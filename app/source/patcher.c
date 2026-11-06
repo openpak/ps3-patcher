@@ -1193,3 +1193,23 @@ bool op_disable_boot_plugin(char *err, int err_len)
 	logf_("boot_plugins.txt renamed to boot_plugins.off");
 	return true;
 }
+
+/* Evilnat PSN-guard workaround (card #155): set the digit the plugin reads after it installs the hook.
+ * mode 1-3 removes the CFW peek/poke syscalls while keeping syscall 8; 0 clears it. Reversed by a reboot
+ * after clearing (the state is per boot). */
+bool op_set_syscall_mode(int mode, char *err, int err_len)
+{
+	s32 fd;
+	u64 w;
+	char c = (char)('0' + mode);
+	if (mode < 0 || mode > 3) { snprintf(err, err_len, "bad mode"); return false; }
+	if (mode == 0) { sysFsUnlink(OPENPAK_DIR "/syscallmode.cfg"); return true; }
+	sysFsMkdir(OPENPAK_DIR, 0777);
+	if (sysFsOpen(OPENPAK_DIR "/syscallmode.cfg", SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, &fd, NULL, 0) != 0) {
+		snprintf(err, err_len, "Could not write syscallmode.cfg."); return false;
+	}
+	sysFsWrite(fd, &c, 1, &w);
+	sysFsClose(fd);
+	logf_("syscall mode set to %d for the next boot", mode);
+	return true;
+}

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.19-sc (Evilnat PSN-guard workaround test; keeps syscall 8)
+
+- Card #155: the XMB shows "PlayStation Network: Disabled -- Disable syscalls to log in" while CFW
+  syscalls are present; the owner had to Disable syscalls every reboot, which also removes syscall 8 that
+  game-process hooking (#156) will need.
+- The guard check itself cannot be patched yet: the only firmware dump on hand is stock Sony 4.93 (no
+  guard); the Evilnat-modified firmware that holds the check is not available to RE. So this is a
+  workaround, not a patch of the check.
+- After the hook installs, the plugin can call PS3MAPI PDISABLE_SYSCALL8 (sc8 0x7777/0x0093, mode 1-3),
+  which removes the CFW peek/poke syscalls (what a CFW check usually tests) while KEEPING syscall 8. Mode
+  3 is "fake disabled" (reversible), 2 keeps only PS3MAPI, 1 keeps cobra+ps3mapi. The mode is one digit in
+  /dev_hdd0/openpak/syscallmode.cfg, applied only after the hook is in; 0/absent leaves syscalls alone.
+  catcher.status gains scmode=; plugin.log records PCHECK before/after.
+- The app offers mode 3 first, then 2, then clear, each with a reboot. Kill switch still skips everything.
+
 ## v0.2.18
 
 - First real-console PSN sign-in on OpenPak (2026-11-06): np-account logged bindAccount 200,

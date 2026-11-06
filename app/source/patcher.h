@@ -80,6 +80,7 @@ typedef struct {
 	bool nohook;          /* openpak_nohook on a USB stick, or /dev_hdd0/openpak/nohook */
 } op_quick;
 
+bool op_set_syscall_mode(int mode, char *err, int err_len);
 void op_quick_read(op_quick *q);
 bool op_install_plugin_file(char *err, int err_len);
 bool op_enable_boot_plugin(char *err, int err_len);
