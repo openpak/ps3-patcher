@@ -89,3 +89,15 @@ Needs webMAN MOD or similar FTP with `dev_flash` writable.
   `include/file/file_devs.h` in github.com/aldostools/webMAN-MOD).
 - Proven on Pier only: the TLS/trust behaviour. Not yet run on a real console: the package install,
   the dev_blind write, the plugin load and the runtime pokes.
+
+## Safety switch: openpak_nohook (v0.2.18 and later)
+
+An **empty file named `openpak_nohook` in the root of a USB stick** that is plugged in when the
+console is turned on keeps the DNS catcher hook out for that boot (also `/dev_hdd0/openpak/nohook`).
+The plugin checks it before installing the hook, and installs the hook only 45 seconds after the XMB
+has started. Use it if a build ever freezes the XMB: power off, put the file on the stick, plug it in,
+power on, then open the OpenPak Patcher and update or choose "Switch back to PSN".
+
+v0.2.17 does **not** read this file. To get out of a v0.2.17 freeze, boot with the network
+disconnected (Ethernet unplugged, or the Wi-Fi router off): the hook only runs when the resolver has a
+nameserver to ask, so with no connection the XMB starts normally and the update can be installed.

@@ -179,8 +179,11 @@ static void build_status(const op_status *s, char *out, size_t n)
 		snprintf(catch, sizeof(catch), "on (list %s v%d, %d families), %u caught, %u passed",
 			 s->catcher_verified[0] ? s->catcher_verified : "bundled", s->catcher_version,
 			 s->catcher_families, s->catcher_caught, s->catcher_passed);
+	else if (!strncmp(s->catcher_state, "pass-through", 12))
+		snprintf(catch, sizeof(catch), "%s (installed, nothing redirected), %u lookups passed",
+			 s->catcher_state, s->catcher_passed);
 	else
-		snprintf(catch, sizeof(catch), "%s", s->catcher_state);   /* "off - <reason>" */
+		snprintf(catch, sizeof(catch), "%s", s->catcher_state);   /* "off - <reason>", "waiting for the XMB" */
 
 	if (!s->vsh_found) snprintf(live, sizeof(live), "vsh not found");
 	else snprintf(live, sizeof(live), "pokes %d/%d, CN %s, Qhook %s",
@@ -270,7 +273,10 @@ int main(int argc, char **argv)
 				ask(false, msg);
 				goto out;
 			}
-			if (ask(true, "OpenPak setup updated. Restart to apply?")) {
+			ask(false, "OpenPak setup updated.\n\nSafety switch: an empty file named openpak_nohook in "
+				    "the root of a USB stick plugged in at power-on keeps the DNS catcher off. "
+				    "The catcher installs only 45 s after the XMB starts.");
+			if (ask(true, "Restart to apply?")) {
 				op_reboot();
 				sleep(10);
 				goto out;
@@ -315,10 +321,11 @@ int main(int argc, char **argv)
 		} else {
 			ask(false, "OpenPak selected.\n\nRestart the console, then sign in under PlayStation "
 				    "Network with your OpenPak email and password. Keep the network DNS on Automatic.");
-			ask(false, "If anything goes wrong: the console still reaches the XMB (the DNS catcher "
-				    "only acts on a lookup, never during boot). Open this app and choose "
-				    "\"Switch back to PSN\", or delete /dev_hdd0/boot_plugins.txt over FTP, then "
-				    "restart. A restart alone also puts the original resolver back.");
+			ask(false, "If the console freezes after a restart: turn it off, put an empty file named "
+				    "openpak_nohook in the root of the USB stick, plug the stick in and turn the "
+				    "console on. The DNS catcher then stays off (it installs only 45 s after the XMB "
+				    "starts, and checks for that file first). Then open this app and choose "
+				    "\"Switch back to PSN\" or install a fixed version.");
 			if (ask(true, "Restart the console now?")) { op_reboot(); sleep(10); }
 		}
 	}

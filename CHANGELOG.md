@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.18-pt (pass-through hardware test)
+
+- v0.2.17 froze the XMB on hardware (wave background, no icons) right after its first caught lookup
+  (np-account saw GET /netstart/ps3): the hook was installed in module_start and caught/chained lookups
+  during the XMB's synchronous start-up. Root cause not yet pinned; this build isolates the install.
+- **Pass-through only:** the hook is installed but catches nothing and calls nothing; it counts the lookup
+  and returns res_goahead (six instructions: no stack frame, no calls, no I/O), so every name resolves
+  through the console's own DNS exactly as without the plugin.
+- **Delayed install:** the hook is installed by the plugin thread 45 s after boot, never in module_start.
+- **Kill switch:** an empty `openpak_nohook` file in the root of a USB stick (dev_usb000/001) or
+  `/dev_hdd0/openpak/nohook` keeps the hook out. Shown on screen after an update and in INSTALL.md.
+- Screen: "DNS catcher: pass-through test (installed, nothing redirected), K lookups passed",
+  "waiting for the XMB" before the install, or "off - <reason>".
+
 ## v0.2.17
 
 - **DNS-catcher pivot.** The patcher is now the PS3's dns_mitm, like the Switch patcher. Instead of

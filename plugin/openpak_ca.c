@@ -276,6 +276,16 @@ static void apply_pokes(void)
 #define RS_DEFOPD0     0x00017784u /* default hook entry */
 #define RS_DEFOPD1     0x006f5558u /* default hook toc (= res_send toc) */
 
+/* v0.2.18-pt: pass-through test build. The hook is installed (late, see catcher_thread) but every
+ * lookup is passed straight on: the hook only counts and returns res_goahead, so res_send sends the
+ * query to the console's own DNS exactly as it would without us. No catch, no answer, no call into
+ * the firmware's own hook, no I/O. This proves only the install and the call/return through our
+ * descriptor on real hardware (v0.2.17 froze the XMB during start-up with catching + chaining on). */
+#ifndef OPENPAK_PASSTHROUGH
+#define OPENPAK_PASSTHROUGH 1
+#endif
+#define INSTALL_DELAY_S 45          /* install only after the XMB has finished starting */
+
 /* Descriptor res_send calls (module.S), and the trampoline that calls the saved original (module.S). */
 extern const u32 openpak_opd_qhook[2];
 extern long openpak_call_qhook(u32 opd, void *ns, void *query, void *querylen,
@@ -302,6 +312,11 @@ static volatile u32 g_ring_w __attribute__((section(".data.rel.ro"))) = 0;
 int openpak_qhook(unsigned char **ns, unsigned char **query, int *querylen,
 		  unsigned char *ans, int anssiz, int *resplen)
 {
+#if OPENPAK_PASSTHROUGH
+	(void)ns; (void)query; (void)querylen; (void)ans; (void)anssiz; (void)resplen;
+	g_passed++;
+	return CATCHER_GOAHEAD;
+#else
 	char name[CATCHER_NAME];
 	int hit = -1, r;
 
@@ -317,6 +332,7 @@ int openpak_qhook(unsigned char **ns, unsigned char **query, int *querylen,
 	}
 	g_passed++;
 	return (int)openpak_call_qhook(g_orig_opd, ns, query, querylen, ans, anssiz, resplen);
+#endif
 }
 
 static void build_list(void)
@@ -340,11 +356,28 @@ static void set_state(const char *s)
 	g_state[i] = 0;
 }
 
+/* Kill switch: an (empty) file named openpak_nohook on the USB stick (any of the first two USB ports)
+ * or /dev_hdd0/openpak/nohook keeps the hook out, so the owner can disable it from a PC without the XMB. */
+static int file_exists(const char *path)
+{
+	int fd = -1;
+	if (sc4(801, (long)path, 0, (long)&fd, 0) != 0) return 0;   /* sys_fs_open O_RDONLY */
+	sc4(804, fd, 0, 0, 0);
+	return 1;
+}
+
+static int kill_switch(void)
+{
+	return file_exists("/dev_usb000/openpak_nohook") || file_exists("/dev_usb001/openpak_nohook") ||
+	       file_exists("/dev_hdd0/openpak/nohook");
+}
+
 /* Verify every res_send constant, then store the Qhook pointer. Returns 1 when the hook is live. */
 static int install_catcher(void)
 {
 	u32 my;
 
+	if (kill_switch()) { tr("catcher kill switch present", 0); set_state("off - kill switch openpak_nohook"); return 0; }
 	if (!g_vsh_pid) g_vsh_pid = find_vsh_pid();
 	if (!g_vsh_pid) { set_state("off - vsh not found"); return 0; }
 	if (g_list.n == 0) { set_state("off - empty list"); return 0; }
@@ -362,7 +395,7 @@ static int install_catcher(void)
 	}
 	{
 		u32 cell = mem_u32(RS_CELL_ADDR);
-		if (cell == (u32)(u64)openpak_opd_qhook) { g_orig_opd = RS_CELL_DEF; set_state("on"); return 1; }
+		if (cell == (u32)(u64)openpak_opd_qhook) { g_orig_opd = RS_CELL_DEF; set_state(OPENPAK_PASSTHROUGH ? "pass-through test" : "on"); return 1; }
 		if (cell != RS_CELL_DEF) { tr("catcher cell occupied", cell); set_state("off - another hook present"); return 0; }
 	}
 
@@ -373,7 +406,7 @@ static int install_catcher(void)
 		return 0;
 	}
 	tr("catcher installed, opd", my);
-	set_state("on");
+	set_state(OPENPAK_PASSTHROUGH ? "pass-through test" : "on");
 	return 1;
 }
 
@@ -450,7 +483,18 @@ void catcher_thread(u64 arg)
 	int i;
 	(void)arg;
 	tr("catcher thread entered", 0);
-	for (i = 0; i < 3 && g_run; i++) { flush_status(); write_catcher_status(); usleep_(1000000); }
+	set_state("waiting for the XMB");
+	/* Install only after the XMB has finished starting (v0.2.17 installed in module_start and froze it). */
+	for (i = 0; i < INSTALL_DELAY_S && g_run; i++) {
+		flush_status();
+		if (i % 5 == 0) write_catcher_status();
+		usleep_(1000000);
+	}
+	if (g_run) {
+		if (install_catcher()) tr("catcher installed late, cell", mem_u32(RS_CELL_ADDR));
+		else tr("catcher left out", 0);
+		write_catcher_status();
+	}
 	while (g_run) {
 		flush_status();
 		if (g_caught != lastc || g_passed != lastp) {
@@ -493,13 +537,9 @@ int module_start(u64 args, const void *argp)
 
 	build_list();
 	tr("catcher families", (unsigned long long)g_list.n);
-	if (install_catcher()) {
-		tr("catcher on, caught cell", mem_u32(RS_CELL_ADDR));
-		if (g_pk[0] && g_pk[0] == g_pk[2]) { usleep_(700000); sc4(392, 0x1004, 0x7, 0x36, 0); }
-	} else {
-		tr("catcher off", 0);
-	}
-	if (start_catcher_thread() != 0) tr("catcher thread create failed", 0);
+	if (g_pk[0] && g_pk[0] == g_pk[2]) { usleep_(700000); sc4(392, 0x1004, 0x7, 0x36, 0); }
+	/* The hook is installed by the thread, INSTALL_DELAY_S after boot, never here. */
+	if (start_catcher_thread() != 0) { tr("catcher thread create failed", 0); set_state("off - thread did not start"); }
 	else tr("catcher thread started", 0);
 
 	tr("module_start returns", 0);
