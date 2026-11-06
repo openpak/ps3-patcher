@@ -47,6 +47,7 @@ typedef struct {
 	bool redirect_ran;    /* redirect.status written by this boot's plugin */
 	char redirect_state[16];  /* ok | hen | nolv2 | nothread | restored */
 	int  redirect_names, redirect_of, redirect_live, redirect_passes, redirect_failed;
+	int  redirect_mods, redirect_modhits, redirect_segerr;   /* -1: plugin older than v0.2.16 */
 	bool vsh_found;       /* PS3MAPI found the vsh process */
 	int  vsh_pid;
 	int  live_poke_patched, live_poke_orig, live_poke_total;  /* the u32 pokes, read from vsh memory */

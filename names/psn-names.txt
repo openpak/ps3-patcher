@@ -19,6 +19,11 @@
 # Left out on purpose: XML namespace URIs ("http://playstation.net/np/rt/..." are compared
 # against what the server sends, not connected to) and JID formats ("%s@%s.%s.%s.playstation.net").
 #
+# The bare "ac.playstation.net" (no leading dot) is the sign-in host's suffix: the native client in
+# vsh.self and in npsignin_plugin / regcam_plugin / explore_plugin builds the host as "%s.%s.%s" from
+# "native-ps3", the environment ("np") and "ac.playstation.net", so ".ac.playstation.net" never sees it.
+# It stays after ".ac.playstation.net" (first match wins).
+#
 # (no header row: the first column is the match, the second the replacement)
 .ac.playstation.net	.ac.ps3.openpak.org
 .dl.playstation.net	.dl.ps3.openpak.org
@@ -31,3 +36,4 @@
 .home.playstation.net	.home.ps3.openpak.org
 stun.playstation.net	stun.ps3.openpak.org
 trophy.playstation.net	trophy.ps3.openpak.org
+ac.playstation.net	ac.ps3.openpak.org

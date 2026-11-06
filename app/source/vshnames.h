@@ -33,5 +33,6 @@ static const struct { unsigned int addr; const char *name; } vsh_names[] = {
 	{ 0x686643u, ".ac.playstation.net" },
 	{ 0x688b18u, ".dl.playstation.net" },
 	{ 0x68a9b8u, ".dl.playstation.net" },
+	{ 0x68bb40u, "ac.playstation.net" },     /* native-ps3.<env>.ac.playstation.net, the sign-in host */
 	{ 0x695ff8u, ".dl.playstation.net" },
 };

@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.16
+
+- v0.2.15 on hardware: pokes 3/3, 20 of 32 vsh names rewritten, yet PSN sign-in still reached Sony (its
+  wrong-ID answer is the "device setup password" QR screen) and np-account saw no getCountries/bindAccount.
+  Cause: the sign-in host `native-ps3.np.ac.playstation.net` is built as `"%s.%s.%s"` from `native-ps3`, `np`
+  and a bare `ac.playstation.net` (no leading dot), so the `.ac.playstation.net` entry never matched it. That
+  copy is in vsh.self (0x68bb40) and in every module with the native client: npsignin_plugin and
+  regcam_plugin (loaded only when sign-in opens), explore_plugin, nas_plugin and others.
+- New list entry `ac.playstation.net` -> `ac.ps3.openpak.org` (after the dotted one), and the vsh copy at
+  0x68bb40 joins the vsh name table (33 entries).
+- The scan thread polls vsh's module list every second (PS3MAPI GET_ALL_PROC_MODULE_PID) and scans each new
+  module's segments (GET_PROC_MODULE_SEGMENTS) through GET/SET_PROC_MEM with the same equal-length swap and
+  read-back; our own module is skipped. plugin.log: `modules scanned, hits`, `mod hits <module>` per
+  module; redirect.status gains `mods= modhits= modfail= segerr=`, shown on the main page. Works under HEN too.
+- The lv1/lv2 walk now runs every 20 s for 6 passes, then every 2 minutes, and polls modules between windows.
+- The 12 "name differs" entries are the `.update.playstation.net` part of the region update-list URLs
+  (`http://fXX01.ps3.update.playstation.net/update/ps3/list/<cc>/ps3-updatelist.txt`, 0x50 apart); they
+  differ on the console's CFW vsh. plugin.log now also prints the 8 bytes found there (` found`).
+
 ## v0.2.15
 
 - v0.2.14 on hardware: the plugin runs (pokes 3/3, CN yes, redirect "11 names"), PSN sign-in fails with

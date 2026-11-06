@@ -754,6 +754,14 @@ void op_status_read(op_status *s)
 			s->redirect_live = lv;
 			s->redirect_passes = ps;
 			s->redirect_failed = fl;
+			{
+				char *m = strstr((char *)st, " mods=");
+				int a = -1, b = -1, c = 0, d = -1;
+				if (m) sscanf(m, " mods=%d modhits=%d modfail=%d segerr=%d", &a, &b, &c, &d);
+				s->redirect_mods = a;
+				s->redirect_modhits = b;
+				s->redirect_segerr = d;
+			}
 			logf_("redirect.status: %s", (char *)st);
 		}
 		free(st);

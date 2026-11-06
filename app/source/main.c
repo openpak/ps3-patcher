@@ -159,7 +159,7 @@ static void ask_pages(const char *text)
 static void build_status(const op_status *s, char *out, size_t n)
 {
 	bool on = op_is_openpak(s);
-	char plug[64], redir[96], live[160], cobp[64];
+	char plug[64], redir[160], live[160], cobp[64];
 
 	if (!s->plugin_listed) snprintf(plug, sizeof(plug), "not installed");
 	else if (!s->plugin_ran && !s->plugin_c_ran && !s->plugin_d_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
@@ -177,10 +177,11 @@ static void build_status(const op_status *s, char *out, size_t n)
 	else if (s->live_names_rewritten > 0 && !s->redirect_ran)
 		snprintf(redir, sizeof(redir), "%d names in vsh", s->live_names_rewritten);
 	else if (!s->redirect_ran) snprintf(redir, sizeof(redir), "not run yet");
-	else if (!strcmp(s->redirect_state, "ok"))
-		snprintf(redir, sizeof(redir), "%d names%s", s->redirect_names,
-			 s->redirect_failed ? " (some did not verify, see log)" : "");
-	else if (!strcmp(s->redirect_state, "hen")) snprintf(redir, sizeof(redir), "unavailable (HEN has no lv1 poke)");
+	else if (!strcmp(s->redirect_state, "ok") || !strcmp(s->redirect_state, "hen"))
+		snprintf(redir, sizeof(redir), "%d names%s; modules %d scanned, %d names%s", s->redirect_names,
+			 s->redirect_failed ? " (some did not verify, see log)" : "",
+			 s->redirect_mods, s->redirect_modhits,
+			 s->redirect_segerr > 0 ? " (segments not readable, see log)" : "");
 	else if (!strcmp(s->redirect_state, "nolv2")) snprintf(redir, sizeof(redir), "unavailable (lv1 memory not reachable)");
 	else if (!strcmp(s->redirect_state, "nothread")) snprintf(redir, sizeof(redir), "unavailable (thread did not start)");
 	else snprintf(redir, sizeof(redir), "%s", s->redirect_state);

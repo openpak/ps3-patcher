@@ -190,8 +190,8 @@ static long mem_set(u32 addr, const void *buf, long n)
 	return sc8(8, 0x7777, 0x32, g_vsh_pid, (long)addr, (long)buf, n, 0, 0);     /* SET_PROC_MEM */
 }
 
-/* The PSN host names the sign-in code really uses are the copies inside the vsh image (32 known
- * addresses on 4.93 CEX, app/source/vshnames.h). v0.2.14 on hardware: the memory walk below reported 11
+/* The PSN host names the sign-in code really uses are the copies inside the vsh image (33 known
+ * addresses on 4.93 CEX, app/source/vshnames.h; the 12 update-list URLs differ on Evilnat and are left alone). v0.2.14 on hardware: the memory walk below reported 11
  * names rewritten, yet the console still asked DNS for *.playstation.net, and the 32 vsh copies were
  * untouched. Those are rewritten here, through PS3MAPI like the pokes, with the same equal-length
  * suffix swap: the whole name must be there, the write is read back. Returns how many are rewritten. */
@@ -223,7 +223,15 @@ static int apply_names(void)
 				want[j] = (unsigned char)openpak_names[hit].to[j];
 			}
 			if (new_) { done++; continue; }
-			if (!orig) { tr("name differs", vsh_names[i].addr); continue; }
+			if (!orig) {
+				/* the bytes found, so the log says what this firmware has there (v0.2.15: the 12
+				 * ".update.playstation.net" copies in the update-list URLs differ on Evilnat 4.93) */
+				u64 w = 0;
+				for (j = 0; j < 8; j++) w = (w << 8) | cur[j];
+				tr("name differs", vsh_names[i].addr);
+				tr(" found", w);
+				continue;
+			}
 		}
 		if (mem_set(vsh_names[i].addr, want, (long)len) != 0) { tr("name write failed", vsh_names[i].addr); continue; }
 		if (mem_get(vsh_names[i].addr, cur, (long)len) == 0) {
@@ -306,12 +314,152 @@ static void lv1_poke(u64 a, u64 v)
 #define RD_PEEK(a)     lv1_peek(a)
 #define RD_POKE(a, v)  lv1_poke((a), (v))
 #define RD_LV2PEEK(a)  ((u64)sc8(SC_PEEK_LV2, (long)(0x8000000000000000ULL | (u64)(a)), 0, 0, 0, 0, 0, 0, 0))
-#define RD_PAUSE()     usleep_(3000)
+static void pause_tick(void);
+#define RD_PAUSE()     pause_tick()
 #define RD_RUN()       (g_run)
 static volatile int g_hitlog __attribute__((section(".data.rel.ro"))) = 0;
 /* every memory-walk rewrite goes to plugin.log (first 24): index of the name and the low 32 bits of the real address */
 #define RD_HIT(a, k) do { if (g_hitlog < 24) { g_hitlog++; tr("rd hit", ((unsigned long long)(k) << 32) | ((a) & 0xffffffffULL)); } } while (0)
 #include "redirect.h"
+
+/* ---- vsh module scan ------------------------------------------------------------------------
+ * v0.2.15 on hardware: sign-in still went to Sony. The sign-in host is built as "%s.%s.%s" from
+ * "native-ps3", "np" and a bare "ac.playstation.net" (no leading dot), and that copy lives in vsh.self
+ * and in every module carrying the native client: npsignin_plugin and regcam_plugin, which vsh loads
+ * only when PSN sign-in is opened, plus explore_plugin and others. The lv1 walk never reaches those
+ * modules' pages. So every second the thread asks PS3MAPI for vsh's module list
+ * (GET_ALL_PROC_MODULE_PID 0x41) and, for each module id it has not seen yet, reads the module's
+ * segments (GET_PROC_MODULE_SEGMENTS 0x48) and rewrites the names in them through GET/SET_PROC_MEM, with
+ * the same equal-length swap and read-back as everything else. Our own module is skipped (its name table
+ * holds the very strings being matched). Module rewrites are not undone at module_stop: an unloaded
+ * module's pages may belong to something else by then. */
+
+#define MOD_MAX 128
+
+struct mod_seg { u64 base, filesz, memsz, index, type; };
+struct mod_info {
+	u64 size;
+	char name[30];
+	char version[2];
+	u32 modattribute, start_entry, stop_entry, all_segments_num;
+	u32 filename, filename_size, segments, segments_num;
+};
+
+struct mod_state {
+	int seen[MOD_MAX];     /* module ids in the last list, so only new ones are scanned */
+	int nseen;
+	int scanned, hits, failed, segerr;
+	int segerr_logged;
+	struct mod_seg seg[10];
+	char fname[512];
+};
+
+/* Rewrite one match at vsh address a with list entry k: the original must be there, the write is read back. */
+static int proc_patch(struct mod_state *ms, u32 a, int k)
+{
+	const unsigned int len = openpak_names[k].len;
+	unsigned char cur[48];
+
+	if (len > sizeof(cur) || mem_get(a, cur, (long)len) != 0) { ms->failed++; return 0; }
+	if (!rd_same(cur, openpak_names[k].from, len)) return 0;
+	if (mem_set(a, openpak_names[k].to, (long)len) != 0) { ms->failed++; return 0; }
+	if (mem_get(a, cur, (long)len) != 0 || !rd_same(cur, openpak_names[k].to, len)) {
+		mem_set(a, openpak_names[k].from, (long)len);
+		ms->failed++;
+		return 0;
+	}
+	return 1;
+}
+
+static int scan_proc_range(struct rd_state *st, struct mod_state *ms, u32 base, u32 size)
+{
+	u32 off, i, k;
+	int hits = 0;
+
+	for (off = 0; off < size && g_run; off += RD_WIN) {
+		u32 n = size - off, lim;
+		if (n > RD_WIN + RD_OVERLAP) n = RD_WIN + RD_OVERLAP;
+		lim = n < RD_WIN ? n : RD_WIN;
+		if (mem_get(base + off, st->buf, (long)n) != 0) { ms->failed++; continue; }
+		for (i = 0; i < lim; i++) {
+			if (!st->first[st->buf[i]]) continue;
+			for (k = 0; k < OPENPAK_NAMES_N; k++) {
+				if ((unsigned char)openpak_names[k].from[0] != st->buf[i]) continue;
+				if (i + openpak_names[k].len > n) continue;
+				if (!rd_same(st->buf + i, openpak_names[k].from, openpak_names[k].len)) continue;
+				hits += proc_patch(ms, base + off + i, (int)k);
+				i += openpak_names[k].len - 1;
+				break;
+			}
+		}
+	}
+	return hits;
+}
+
+static void scan_module(struct rd_state *st, struct mod_state *ms, int id)
+{
+	struct mod_info info;
+	const u32 self = (u32)(u64)openpak_names[0].from;     /* an address inside our own module */
+	char *p = (char *)&info;
+	unsigned int s, k;
+	long r;
+	int hits = 0;
+	u32 lo = 0;
+
+	for (k = 0; k < sizeof(info); k++) p[k] = 0;
+	p = (char *)ms->seg;
+	for (k = 0; k < sizeof(ms->seg); k++) p[k] = 0;
+	info.size = sizeof(info);
+	info.segments = (u32)(u64)ms->seg;
+	info.segments_num = sizeof(ms->seg) / sizeof(ms->seg[0]);
+	info.filename = (u32)(u64)ms->fname;
+	info.filename_size = sizeof(ms->fname);
+	r = sc8(8, 0x7777, 0x48, g_vsh_pid, id, (long)&info, 0, 0, 0);   /* GET_PROC_MODULE_SEGMENTS */
+	if (r != 0) {
+		ms->segerr++;
+		if (ms->segerr_logged < 3) { ms->segerr_logged++; tr("mod segments failed", ((u64)(u32)id << 32) | (u32)r); }
+		return;
+	}
+	ms->scanned++;
+	for (s = 0; s < info.segments_num && s < sizeof(ms->seg) / sizeof(ms->seg[0]); s++) {
+		u64 b = ms->seg[s].base, n = ms->seg[s].filesz;
+		if (!n || b >= 0x100000000ULL || n > 0x2000000ULL) continue;
+		if (self >= b && self < b + n) return;                  /* our own module */
+		if (!lo) lo = (u32)b;
+		hits += scan_proc_range(st, ms, (u32)b, (u32)n);
+	}
+	if (hits) {
+		char line[48];
+		int q = 0;
+		const char *pre = "mod hits ";
+		while (*pre) line[q++] = *pre++;
+		for (k = 0; k < sizeof(info.name) && info.name[k] && q < 46; k++) line[q++] = info.name[k];
+		line[q] = 0;
+		tr(line, ((u64)(u32)hits << 32) | lo);
+		ms->hits += hits;
+	}
+}
+
+/* One look at vsh's module list: scan every id that was not there last time. */
+static void mod_poll(struct rd_state *st, struct mod_state *ms)
+{
+	int list[MOD_MAX];
+	int i, j, n = 0;
+
+	if (!g_vsh_pid) g_vsh_pid = find_vsh_pid();
+	if (!g_vsh_pid) return;
+	for (i = 0; i < MOD_MAX; i++) list[i] = 0;
+	if (sc4(8, 0x7777, 0x41, g_vsh_pid, (long)list) != 0) return;   /* GET_ALL_PROC_MODULE_PID */
+	for (i = 0; i < MOD_MAX && g_run; i++) {
+		int id = list[i], old = 0;
+		if (id == 0 || id == -1 || id == 1) continue;
+		for (j = 0; j < ms->nseen; j++) if (ms->seen[j] == id) { old = 1; break; }
+		if (!old) scan_module(st, ms, id);
+	}
+	for (i = 0; i < MOD_MAX; i++)
+		if (list[i] != 0 && list[i] != -1 && list[i] != 1) ms->seen[n++] = list[i];
+	ms->nseen = n;
+}
 
 static int write_file(const char *path, const char *buf, int n)
 {
@@ -344,8 +492,10 @@ static int put_num(char *b, int n, unsigned long v)
 }
 
 /* /dev_hdd0/openpak/redirect.status: one summary line, then "<live count> TAB <match>" per entry.
- * state: ok | hen (no lv1 poke under HEN) | nolv2 (lv2 base not found) | nothread. */
-static int write_redirect_status(const char *state, const struct rd_state *st)
+ * state: ok | hen (no lv1 poke under HEN; modules still scanned) | nolv2 (lv2 base not found) | nothread.
+ * mods= module ids scanned, modhits= names rewritten in modules, modfail= module reads/writes that failed,
+ * segerr= modules whose segments PS3MAPI did not return. */
+static int write_redirect_status(const char *state, const struct rd_state *st, const struct mod_state *ms)
 {
 	char buf[1024];
 	int n = 0, k;
@@ -357,6 +507,10 @@ static int write_redirect_status(const char *state, const struct rd_state *st)
 	n = put_str(buf, n, " passes="); n = put_num(buf, n, st ? (unsigned)st->passes : 0);
 	n = put_str(buf, n, " failed="); n = put_num(buf, n, st ? (unsigned)st->failed : 0);
 	n = put_str(buf, n, " via="); n = put_str(buf, n, g_via == 0 ? "ps3mapi" : "cfw");
+	n = put_str(buf, n, " mods="); n = put_num(buf, n, ms ? (unsigned)ms->scanned : 0);
+	n = put_str(buf, n, " modhits="); n = put_num(buf, n, ms ? (unsigned)ms->hits : 0);
+	n = put_str(buf, n, " modfail="); n = put_num(buf, n, ms ? (unsigned)ms->failed : 0);
+	n = put_str(buf, n, " segerr="); n = put_num(buf, n, ms ? (unsigned)ms->segerr : 0);
 	buf[n++] = '\n';
 	for (k = 0; st && k < OPENPAK_NAMES_N && n < 900; k++) {
 		n = put_num(buf, n, (unsigned)st->hits[k]);
@@ -373,50 +527,68 @@ static void flush_status(void)
 	if (g_pk[3] && write_status(g_pk[0], g_pk[1], g_pk[2]) == 0) g_pk[3] = 0;
 }
 
+/* The lv1 walk takes seconds; the module list is still polled about once a second from inside it
+ * (RD_PAUSE, between windows, when st->buf is free), so a module opened mid-walk is not missed. */
+static struct rd_state *volatile g_stp __attribute__((section(".data.rel.ro"))) = 0;
+static struct mod_state *volatile g_msp __attribute__((section(".data.rel.ro"))) = 0;
+static volatile int g_ticks __attribute__((section(".data.rel.ro"))) = 0;
+static volatile int g_hen __attribute__((section(".data.rel.ro"))) = 0;
+
+static void pause_tick(void)
+{
+	usleep_(3000);
+	if (++g_ticks >= 200 && g_stp && g_msp) { g_ticks = 0; mod_poll(g_stp, g_msp); }
+}
+
 /* The scan thread. Raw lv2 thread: no libc, no TLS, so it only uses its own stack, the raw
- * syscalls above and read-only tables. Passes: 5 s after boot, then back-to-back with a 2 s gap
- * for ~24 passes (a module that loads later is caught within one pass), then every 20 s for 36
- * more, then every 2 minutes. */
+ * syscalls above and read-only tables. Every second: vsh's module list (new modules are scanned at
+ * once). The lv1/lv2 walk: 5 s after boot, then every 20 s for 6 passes, then every 2 minutes. */
 void scan_thread(u64 arg)
 {
 	struct rd_state st;
-	int lastnbk = -1, lastfail = -1, i, dirty = 0;
+	struct mod_state ms;
+	int lastnbk = -1, lastfail = -1, lasthits = -1, lastmods = -1, lastmf = -1, i, dirty = 1;
+	unsigned long tick = 0, next_pass = 0;
+	const char *state;
 	(void)arg;
 
 	tr("scan thread entered", 0);
 	rd_init(&st);
-	for (g_via = 0; g_via < 2; g_via++) {
-		st.lv2off = rd_find_lv2off();
-		if (st.lv2off) break;
+	{ char *p = (char *)&ms; unsigned long n = sizeof(ms); while (n--) *p++ = 0; }
+	if (!g_hen) {
+		for (g_via = 0; g_via < 2; g_via++) {
+			st.lv2off = rd_find_lv2off();
+			if (st.lv2off) break;
+		}
+		if (!st.lv2off) g_via = 0;
 	}
 	tr("lv2off", st.lv2off);
-	if (!st.lv2off) {
-		for (i = 0; i < 120 && g_run; i++) {
-			flush_status();
-			if (write_redirect_status("nolv2", NULL) == 0) break;
-			usleep_(1000000);
+	state = g_hen ? "hen" : st.lv2off ? "ok" : "nolv2";
+	for (i = 0; i < 5 && g_run; i++) { flush_status(); usleep_(1000000); }
+	mod_poll(&st, &ms);
+	tr("modules scanned, hits", ((u64)(u32)ms.scanned << 32) | (u32)ms.hits);
+	g_stp = &st;
+	g_msp = &ms;
+	while (g_run) {
+		mod_poll(&st, &ms);
+		if (st.lv2off && tick >= next_pass) {
+			rd_pass(&st);
+			next_pass = tick + (st.passes < 6 ? 20 : 120);
 		}
-	} else {
-		for (i = 0; i < 5; i++) { flush_status(); usleep_(1000000); }
-		while (g_run) {
-					rd_pass(&st);
-					if (st.nbk != lastnbk || st.failed != lastfail || st.passes == 1) {
-				dirty = 1;
-				lastnbk = st.nbk;
-				lastfail = st.failed;
-			}
-			{
-				unsigned long gap = st.passes < 24 ? 2 : st.passes < 60 ? 20 : 120;
-				for (i = 0; i < (int)gap && g_run; i++) {
-					flush_status();
-					if (dirty && write_redirect_status("ok", &st) == 0) dirty = 0;
-					usleep_(1000000);
-				}
-			}
+		if (st.nbk != lastnbk || st.failed != lastfail || ms.hits != lasthits || ms.scanned != lastmods ||
+		    ms.failed != lastmf) {
+			dirty = 1;
+			lastnbk = st.nbk; lastfail = st.failed; lasthits = ms.hits; lastmods = ms.scanned; lastmf = ms.failed;
 		}
-		rd_restore(&st);
-		write_redirect_status("restored", &st);
+		flush_status();
+		if (dirty && write_redirect_status(state, &st, &ms) == 0) dirty = 0;
+		usleep_(1000000);
+		tick++;
 	}
+	g_stp = 0;
+	g_msp = 0;
+	if (st.lv2off) rd_restore(&st);
+	write_redirect_status("restored", &st, &ms);
 	sc8(SC_THREAD_EXIT, 0, 0, 0, 0, 0, 0, 0, 0);
 	for (;;) usleep_(1000000);
 }
@@ -440,14 +612,11 @@ static int start_scan_thread(void)
 
 static void start_redirect(void)
 {
-	/* PS3HEN has no lv1 poke (webMAN refuses block_online_servers there too). */
-	if ((int)sc8(SC_PEEK_LV1, 0x1337, 0, 0, 0, 0, 0, 0, 0) == 0x1337) {
-		write_redirect_status("hen", NULL);
-		return;
-	}
+	/* PS3HEN has no lv1 poke (webMAN refuses block_online_servers there too): the thread then only scans modules. */
+	if ((int)sc8(SC_PEEK_LV1, 0x1337, 0, 0, 0, 0, 0, 0, 0) == 0x1337) g_hen = 1;   /* modules only */
 	if (start_scan_thread() != 0) {
 		tr("thread create failed", 0);
-		write_redirect_status("nothread", NULL);
+		write_redirect_status("nothread", NULL, NULL);
 	} else {
 		tr("thread started", 0);
 	}

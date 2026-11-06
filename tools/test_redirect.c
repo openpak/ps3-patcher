@@ -50,6 +50,8 @@ int main(void)
 	put(0x884400, "hoge.ac.playstation.nexx");                         /* near miss */
 	put(0xE1FFF0, "trophy.playstation.net");                           /* last bytes of the LV1 range */
 	put(0x300000 - 2, "z.ac.playstation.net");                         /* below the LV1 range: ignored */
+	put(0x884500, "native-ps3");                                       /* the sign-in host's pieces */
+	put(0x884510, "ac.playstation.net");                               /* bare suffix, "%s.%s.%s" */
 
 	rd_init(&st);
 	st.lv2off = off;
@@ -68,17 +70,18 @@ int main(void)
 	CHECK(is(0x884400, "hoge.ac.playstation.nexx"));
 	CHECK(is(0xE1FFF0, "trophy.ps3.openpak.org"));
 	CHECK(is(0x300000 - 2, "z.ac.playstation.net"));
-	CHECK(st.nbk == 7 && st.failed == 0);
-	CHECK(rd_names_live(&st) == 6);
+	CHECK(is(0x884510, "ac.ps3.openpak.org"));
+	CHECK(st.nbk == 8 && st.failed == 0);
+	CHECK(rd_names_live(&st) == 7);
 
 	/* a second pass is a no-op */
-	{ int before = pokes; rd_pass(&st); CHECK(pokes == before); CHECK(st.nbk == 7); }
+	{ int before = pokes; rd_pass(&st); CHECK(pokes == before); CHECK(st.nbk == 8); }
 
 	/* a name that appears later (module loaded after boot) is caught by the next pass */
 	put(0x890000, "x.communication.playstation.net");
 	rd_pass(&st);
 	CHECK(is(0x890000, "x.communication.ps3.openpak.org"));
-	CHECK(st.nbk == 8);
+	CHECK(st.nbk == 9);
 
 	/* restore puts every original byte back; nothing else was touched */
 	rd_restore(&st);
@@ -89,6 +92,7 @@ int main(void)
 	CHECK(is(0x1000000 + 0x7FFF10, "np.ac.playstation.net"));
 	CHECK(is(0xE1FFF0, "trophy.playstation.net"));
 	CHECK(is(0x890000, "x.communication.playstation.net"));
+	CHECK(is(0x884510, "ac.playstation.net"));
 	CHECK(st.nbk == 0 && rd_names_live(&st) == 0);
 
 	/* lv2 offset not found when the views disagree */
