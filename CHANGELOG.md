@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.18-st3 (Step F root cause: 64-bit read of a 32-bit query slot)
+
+- st2 ladder: D (bare asm hook) and E (count + pass-through) survived; F froze at the first lookup after
+  the install (PSN sign-in), before any request reached np-account. Cause, from vsh.self 4.93 and the
+  built binary: res_send keeps every hook argument slot as a 32-bit word (stw r3,464(r1) query,
+  stw r4,472(r1) querylen, stw r3,124(r1) ns, resplen at 120(r1), re-read with lwz after the hook), but
+  the C hook declared `unsigned char **query` and read *query with a 64-bit ld (query<<32 | junk), then
+  read the packet from that address. E never dereferenced query.
+- The hook now takes the slots as 32-bit (`unsigned int *ns, unsigned int *query`) and widens the
+  pointer itself; the built hook reads them with lwz and writes them with stw only.
+- F answers a matching name in the hook (res_done, box IP). G instead points the query's nameserver slot
+  at OpenPak DNS and returns res_goahead; G is a fallback: with one nameserver res_send reuses a
+  connected UDP socket, and unconnected replies are checked against its own nameserver list.
+
 ## v0.2.18-st2 (hook call isolated: no-op / count / catch)
 
 - Step D (boot-time pass-through hook) froze on the first lookup; the install was fine (cell set to our

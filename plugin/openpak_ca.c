@@ -320,25 +320,42 @@ static volatile u32 g_ring_w __attribute__((section(".data.rel.ro"))) = 0;
  * memory directly and uses no syscalls. catcher_handle writes the DNS answer straight into the
  * firmware's answer buffer. A matching name -> res_done (3) with the box address; anything else ->
  * the original firmware hook, unchanged. */
-int openpak_qhook(unsigned char **ns, unsigned char **query, int *querylen,
+/* The firmware's res_send keeps every argument slot as a 32-bit word (vsh.self 4.93: stw r3,464(r1)
+ * query, stw r4,472(r1) querylen, stw r3,124(r1) ns, resplen at 120(r1); re-read with lwz after the
+ * hook). The hook's own arguments are zero-extended 32-bit addresses of those slots, so the slots must
+ * be read as 32-bit: v0.2.18-st2 step F read *query with a 64-bit ld (query<<32 | junk) and faulted. */
+static const unsigned char g_box_sa[16] __attribute__((aligned(4))) = {
+	16, 2, 0, 53,                                    /* sin_len, AF_INET, port 53 */
+	OPENPAK_LIST_IP0, OPENPAK_LIST_IP1, OPENPAK_LIST_IP2, OPENPAK_LIST_IP3,
+	0, 0, 0, 0, 0, 0, 0, 0
+};
+
+int openpak_qhook(unsigned int *ns, unsigned int *query, int *querylen,
 		  unsigned char *ans, int anssiz, int *resplen)
 {
-	(void)ns;
-	if (g_step == 'f') {
+	if (g_step >= 'f') {
+		const unsigned char *q = (const unsigned char *)(unsigned long)*query;   /* 32-bit slot */
 		char name[CATCHER_NAME];
-		int hit = -1, r;
-		r = catcher_handle(&g_list, *query, *querylen, ans, anssiz, name, &hit);
-		if (r > 0) {
+		int hit = -1, r = 0, qlen = *querylen;
+		if (g_step == 'f') {
+			r = catcher_handle(&g_list, q, qlen, ans, anssiz, name, &hit);
+		} else {   /* 'g': point this query at OpenPak DNS instead of answering it here */
+			int qt, qc, qe;
+			name[0] = 0;
+			if (catcher_question(q, qlen, name, &qt, &qc, &qe)) hit = catcher_match(&g_list, name);
+			if (hit >= 0) *ns = (unsigned int)(unsigned long)g_box_sa;      /* 32-bit slot */
+		}
+		if (hit >= 0) {
 			unsigned int w = g_ring_w, i;
-			*resplen = r;
-			g_caught++;
 			for (i = 0; i + 1 < RING_W && name[i]; i++) g_ring[w % RING_N][i] = name[i];
 			g_ring[w % RING_N][i] = 0;
 			g_ring_w = w + 1;
-			return CATCHER_DONE;
+			g_caught++;
+			if (g_step == 'f' && r > 0) { *resplen = r; return CATCHER_DONE; }
+			if (g_step == 'g') return CATCHER_GOAHEAD;
 		}
 	} else {
-		(void)query; (void)querylen; (void)ans; (void)anssiz; (void)resplen;
+		(void)ns; (void)query; (void)querylen; (void)ans; (void)anssiz; (void)resplen;
 	}
 	g_passed++;                 /* every non-caught name: count and pass to the console's own DNS */
 	return CATCHER_GOAHEAD;
@@ -495,7 +512,8 @@ static void flush_caught(u32 *seen)
  *   c  + the CA trust pokes written into the running vsh
  *   d  + install a pure-asm res_send hook that returns res_goahead and touches no TOC/global
  *   e  + the C hook: it does g_passed++ then res_goahead (tests a global write from res_send)
- *   f  + the C hook with catching: matching names get the box IP, others pass through
+ *   f  + catching: a matching name is answered here with the box IP (res_done), others pass through
+ *   g  + catching the other way: a matching query's nameserver is pointed at OpenPak DNS (res_goahead)
  * Missing or unreadable file = a (the least). */
 
 static int read_step(void)
@@ -506,8 +524,8 @@ static int read_step(void)
 	if (sc4(801, (long)"/dev_hdd0/openpak/steptest.cfg", 0, (long)&fd, 0) != 0) return 'a';
 	sc4(802, fd, (long)&c, 1, (long)&got);       /* sys_fs_read */
 	sc4(804, fd, 0, 0, 0);
-	if (got == 1 && c >= 'A' && c <= 'F') c = (char)(c + 32);
-	return (got == 1 && c >= 'a' && c <= 'f') ? c : 'a';
+	if (got == 1 && c >= 'A' && c <= 'G') c = (char)(c + 32);
+	return (got == 1 && c >= 'a' && c <= 'g') ? c : 'a';
 }
 
 static void write_lastboot(const char *what);
