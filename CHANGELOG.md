@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.18-bt (boot-time one-shot step test)
+
+- Step A of v0.2.18-st froze the console: plugin.log shows module_start ran and returned in the same second,
+  steptest.log shows "calling Cobra load" and nothing after. Cobra's session load (PS3MAPI 0x1EE7) hangs this
+  console after module_start; boot-time loading worked every time from v0.2.10 to v0.2.16.
+- Steps are boot-time and one-shot: the app writes steptest.cfg and a boot_plugins.txt holding only our line
+  (refuses if another plugin is listed) and restarts. The plugin's first action in module_start renames
+  boot_plugins.txt to boot_plugins.off (unlink fallback), so a freeze clears with a power cycle.
+- Kill switch checked next (openpak_nohook on USB or /dev_hdd0/openpak/nohook): the plugin then does nothing
+  else. Step D rechecks it before installing the hook.
+- lastboot.txt records step, rename result and outcome; the app shows it with the last plugin.log line.
+- Session loading is removed from the app (op_load_plugin is a stub; no "Load it now").
+
 ## v0.2.18-st (step test, nothing loads at boot)
 
 - pt.1's "load now" froze the console. plugin.log: module_start ran, applied the 4 CA pokes to the running

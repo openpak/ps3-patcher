@@ -318,43 +318,40 @@ static bool steps(void)
 			op_quick_read(&q);
 		}
 	}
-	if (q.plugin_matches && !q.listed && !want_exit) {
-		/* v0.2.18-st: one step per session, for this session only (never the boot list). */
-		static const struct { char step; const char *text; } st[4] = {
-			{ 'a', "Step A: load the plugin only (no pokes, no thread)?" },
-			{ 'b', "Step B: load the plugin with its thread (logs \"alive\" every 5 s, nothing else)?" },
-			{ 'c', "Step C: thread + the CA trust pokes into the running console?" },
-			{ 'd', "Step D: thread + pokes + the pass-through hook (installed 45 s after loading)?" },
-		};
-		int k;
-		ask(false, "Step test: one step per console session, in order A, B, C, D. Each loads the plugin "
-			   "for this session only (never at boot). After each step, wait for the result, then restart "
-			   "the console before the next one. If the console freezes, hold power to turn it off and "
-			   "turn it on again: nothing loads at boot.");
-		for (k = 0; k < 4 && !want_exit; k++) {
-			char msg[480];
-			int sec;
-			if (!ask(true, st[k].text)) continue;
-			if (!op_step_load(st[k].step, err, sizeof(err))) { ask(false, err); return false; }
-			ask(false, "Loaded. Press OK, then do not touch anything for 2 minutes. A result appears at "
-				   "the end.");
-			/* 120 s alive loop: the app logs every 5 s; the plugin logs its own lines */
-			for (sec = 0; sec <= 120 && !want_exit; sec++) {
-				if (sec % 5 == 0) op_steplog("step %c: app alive t=%d", st[k].step, sec);
-				{ int f; for (f = 0; f < 60 && !want_exit; f++) { sysUtilCheckCallback(); present(); } }
+	if (q.plugin_matches && !want_exit) {
+		char res[400], msg[480];
+		op_step_result(res, sizeof(res));
+		if (q.listed) {
+			/* a step is armed for the next boot */
+			snprintf(msg, sizeof(msg), "A step is armed for the next boot (boot_plugins.txt names OpenPak; the "
+				 "plugin removes that line itself as soon as it starts).\n\n%s\n\nRestart now?", res);
+			if (ask(true, msg)) { op_reboot(); sleep(10); return false; }
+			if (ask(true, "Disarm it instead (rename boot_plugins.txt to boot_plugins.off)?")) {
+				if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);
+				else ask(false, "Disarmed. Nothing loads at the next boot.");
 			}
-			op_steplog("step %c: 120 s passed", st[k].step);
-			snprintf(msg, sizeof(msg), "Step %c survived 2 minutes.\n\nRestart the console, then run the next "
-				 "step. Logs: /dev_hdd0/openpak/steptest.log and plugin.log", st[k].step - 32);
-			ask(false, msg);
 			return false;
 		}
-	}
-	if (q.listed && q.plugin_matches && !want_exit) {
-		if (ask(true, "The OpenPak boot plugin is ON. Remove it (rename boot_plugins.txt to boot_plugins.off)?")) {
-			if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);
-			else ask(false, "Boot plugin removed. Restart the console.");
-			return false;
+		/* v0.2.18-bt: one boot-time, one-shot step per restart */
+		{
+			static const struct { char step; const char *text; } st[4] = {
+				{ 'a', "Step A at the next boot: the plugin only (no pokes, no thread)?" },
+				{ 'b', "Step B at the next boot: plugin + thread (logs \"alive\" every 5 s)?" },
+				{ 'c', "Step C at the next boot: thread + the CA trust pokes?" },
+				{ 'd', "Step D at the next boot: thread + pokes + pass-through hook at 45 s?" },
+			};
+			int k;
+			snprintf(msg, sizeof(msg), "Step test (boot-time, one boot only). Each step is armed for the "
+				 "next boot and removes itself as it starts, so a freeze clears with a power cycle.\n\n%s",
+				 res);
+			ask(false, msg);
+			for (k = 0; k < 4 && !want_exit; k++) {
+				if (!ask(true, st[k].text)) continue;
+				if (!op_step_arm(st[k].step, err, sizeof(err))) { ask(false, err); return false; }
+				if (ask(true, "Armed. Restart the console now? After it starts, wait 2 minutes on the XMB, then "
+					      "open this app again to see the result.")) { op_reboot(); sleep(10); }
+				return false;
+			}
 		}
 	}
 	return !want_exit && ask(true, "Show full status?\n\nThis reads the console's memory through Cobra (PS3MAPI) "
@@ -427,22 +424,7 @@ int main(int argc, char **argv)
 	/* The plugin is installed and current but Cobra has not loaded it (an outdated install is updated first,
 	 * because "Load it now" would only load the old files): offer to load it now, and show the raw
 	 * return code of Cobra's load call (0 = loaded). */
-	if (0 && s.plugin_file && !s.plugin_loaded && !s.update_needed) {   /* v0.2.18-st: load only via the step test */
-		strncat(text, "\n\nThe plugin is not loaded. Load it now?", sizeof(text) - strlen(text) - 1);
-		if (ask(true, text)) {
-			int ret = 0, slot = -1;
-			char msg[700];
-			bool ok = op_load_plugin(&ret, &slot);
-			sleep(7);
-			snprintf(msg, sizeof(msg), "Cobra load call: last slot %d, return 0x%08x (%s).\n%s", slot, (unsigned)ret,
-				 ok ? "accepted" : "rejected or failed", op_load_report());
-			ask_pages(msg);
-			op_status_read(&s);
-			build_status(&s, text, sizeof(text));
-		} else {
-			build_status(&s, text, sizeof(text));
-		}
-	}
+	/* v0.2.18-bt: no "Load it now": Cobra's session load hangs this console; steps run at boot only. */
 
 	on = op_is_openpak(&s) || s.installed;
 	strncat(text, on ? "\n\nSwitch back to PSN?" : "\n\nSwitch to OpenPak?", sizeof(text) - strlen(text) - 1);

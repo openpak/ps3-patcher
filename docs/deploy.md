@@ -101,3 +101,25 @@ power on, then open the OpenPak Patcher and update or choose "Switch back to PSN
 v0.2.17 does **not** read this file. To get out of a v0.2.17 freeze, boot with the network
 disconnected (Ethernet unplugged, or the Wi-Fi router off): the hook only runs when the resolver has a
 nameserver to ask, so with no connection the XMB starts normally and the update can be installed.
+
+## Boot-time step test (v0.2.18-bt)
+
+Loading a plugin into the running console through Cobra (PS3MAPI 0x1EE7) hangs this console after the
+plugin's module_start returns (Step A, 2026-11-06), so the patcher never does that. Each step runs at boot,
+once:
+
+1. In OpenPak Patcher choose a step (A, B, C, D). The app writes `/dev_hdd0/openpak/steptest.cfg` and a
+   `/dev_hdd0/boot_plugins.txt` holding only the OpenPak line, then restarts.
+2. The plugin's first action at boot renames `boot_plugins.txt` to `boot_plugins.off`, so it loads for
+   that boot only. It writes `/dev_hdd0/openpak/lastboot.txt` and timestamped `plugin.log` lines.
+3. Wait 2 minutes on the XMB, then reopen the app: it shows the last boot's result.
+
+**If a step freezes the console:** hold power until it turns off and turn it on again. The boot list is
+already gone, so it boots clean. An empty `openpak_nohook` file in the root of the USB stick (or
+`/dev_hdd0/openpak/nohook`) makes the plugin do nothing beyond removing the boot list.
+
+**Worst case** (the console freezes before the plugin runs, so the boot list stays): Recovery Menu
+(power off; hold power until the second beep) -> Restart System. That turned Cobra off last time, so no
+plugin loads. Then rename `boot_plugins.txt` with the file manager and turn Cobra back on with Evilnat's
+Toggle Cobra.
+

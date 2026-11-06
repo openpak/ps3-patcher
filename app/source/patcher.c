@@ -654,6 +654,13 @@ bool op_load_plugin(int *ret, int *slot)
 	*ret = 0;
 	*slot = -1;
 	g_load_report[0] = 0;
+	/* v0.2.18-bt: Cobra's session load (0x1EE7) hangs this console after module_start (Step A, 2026-11-06).
+	 * Never load into the running console; steps run at boot only. */
+	if (1) {
+		*ret = (int)0x80010000;
+		snprintf(g_load_report, sizeof(g_load_report), "Session loading is disabled; use the boot-time step test.");
+		return false;
+	}
 	/* only ever load the plugin this package carries (never a leftover v0.2.17 file) */
 	if (!plugin_matches_bundle()) {
 		*ret = (int)0x80010000;
@@ -1219,35 +1226,76 @@ void op_steplog(const char *fmt, ...)
 	}
 }
 
-/* Load the plugin for this session in step mode `step` (a..d). Refuses when Cobra's PS3MAPI does not
- * answer normally (core version 0 was seen in the session that froze; a normal Cobra 8.5 says 0x124). */
-bool op_step_load(char step, char *err, int err_len)
-{
-	s32 core;
-	int ret = 0, slot = -1;
-	bool ok;
-	u64 w;
-	s32 fd;
+/* v0.2.18-bt: arm one boot-time step. Writes steptest.cfg and a boot_plugins.txt holding only our
+ * line; the plugin renames that list away as the first thing in module_start, so it loads for exactly
+ * one boot. Never loads anything into the running console (Cobra's session load hangs this console). */
+#define OPENPAK_LASTBOOT OPENPAK_DIR "/lastboot.txt"
 
-	{ lv2syscall6(8, 0x7777, 0x11, 0, 0, 0, 0); core = (s32)p1; }
-	op_steplog("step %c requested, PS3MAPI core version 0x%08x", step, (unsigned)core);
-	if (core <= 0) {
-		snprintf(err, err_len, "Cobra is not answering normally (PS3MAPI core version 0x%08x). Nothing was "
-			 "loaded. Restart the console and try again.", (unsigned)core);
+bool op_step_arm(char step, char *err, int err_len)
+{
+	u64 len = 0, i = 0;
+	unsigned char *buf;
+	char line[96];
+	int n;
+
+	if (!plugin_matches_bundle()) {
+		snprintf(err, err_len, "The plugin file on disk is not this package's. Install the plugin file first.");
 		return false;
 	}
+	buf = exists(OPENPAK_BOOT_LIST) ? read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len) : NULL;
+	while (buf && i < len) {
+		u64 j = i, k;
+		bool blank = true;
+		while (j < len && buf[j] != '\n') j++;
+		for (k = i; k < j; k++) if (buf[k] != ' ' && buf[k] != '\t' && buf[k] != '\r') blank = false;
+		if (!blank && !is_our_line(buf + i, (size_t)(j - i))) {
+			free(buf);
+			snprintf(err, err_len, "boot_plugins.txt lists another plugin. Remove it first; nothing was armed.");
+			return false;
+		}
+		i = j + 1;
+	}
+	free(buf);
+
 	sysFsUnlink(OPENPAK_PLUGIN_LOG);
 	sysFsUnlink(OPENPAK_CATCHER_STATUS);
-	if (sysFsOpen(OPENPAK_STEP_FILE, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, &fd, NULL, 0) != 0) {
-		snprintf(err, err_len, "Could not write %s.", OPENPAK_STEP_FILE);
+	sysFsUnlink(OPENPAK_LASTBOOT);
+	{
+		s32 fd;
+		u64 w;
+		if (sysFsOpen(OPENPAK_DIR "/steptest.cfg", SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, &fd, NULL, 0) != 0) {
+			snprintf(err, err_len, "Could not write steptest.cfg.");
+			return false;
+		}
+		sysFsWrite(fd, &step, 1, &w);
+		sysFsClose(fd);
+	}
+	n = snprintf(line, sizeof(line), "%s\n", OPENPAK_PLUGIN_DST);
+	if (!write_atomic(OPENPAK_BOOT_LIST, (const unsigned char *)line, (u64)n)) {
+		snprintf(err, err_len, "Could not write %s.", OPENPAK_BOOT_LIST);
 		return false;
 	}
-	sysFsWrite(fd, &step, 1, &w);
-	sysFsClose(fd);
-	op_steplog("step %c: calling Cobra load", step);
-	ok = op_load_plugin(&ret, &slot);
-	op_steplog("step %c: Cobra load returned 0x%08x slot %d (%s) %s", step, (unsigned)ret, slot,
-		   ok ? "loaded" : "not loaded", op_load_report());
-	if (!ok) { snprintf(err, err_len, "Not loaded (0x%08x): %s", (unsigned)ret, op_load_report()); return false; }
+	op_steplog("step %c armed for the next boot (one-shot)", step);
 	return true;
+}
+
+/* Last boot's one-line result and the last plugin.log line, for the step screen. */
+void op_step_result(char *out, int out_len)
+{
+	u64 l1 = 0, l2 = 0;
+	unsigned char *a = read_all(OPENPAK_LASTBOOT, 512, &l1);
+	unsigned char *b = read_all(OPENPAK_PLUGIN_LOG, 64 * 1024, &l2);
+	const char *last = "";
+	if (b && l2) {
+		long e = (long)l2 - 1, st;
+		while (e > 0 && (b[e] == '\n' || b[e] == '\r')) b[e--] = 0;
+		st = e;
+		while (st > 0 && b[st - 1] != '\n') st--;
+		last = (const char *)b + st;
+	}
+	if (a && l1 && a[l1 - 1] == '\n') a[l1 - 1] = 0;
+	snprintf(out, out_len, "Last boot: %s\nLast plugin line: %s", a && l1 ? (char *)a : "(no record)",
+		 last[0] ? last : "(none)");
+	free(a);
+	free(b);
 }

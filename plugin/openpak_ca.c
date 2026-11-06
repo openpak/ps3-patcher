@@ -487,8 +487,10 @@ static void flush_caught(u32 *seen)
 }
 
 /* ---- step test (v0.2.18-st) -------------------------------------------------------------------
- * The app writes one letter to /dev_hdd0/openpak/step.txt before it loads this module for the
- * session (never at boot), so one console session tests one more piece than the last:
+ * v0.2.18-bt: boot-time, one-shot. The app writes one letter to /dev_hdd0/openpak/steptest.cfg and a
+ * boot_plugins.txt holding only our line; module_start's first action renames that list away, so the
+ * plugin loads for exactly one boot (Cobra's session load hangs this console after module_start). Each
+ * step tests one more piece than the last:
  *   a  module_start only: no pokes, no thread
  *   b  + the thread (alive line every 5 s, nothing else)
  *   c  + the CA trust pokes written into the running vsh
@@ -501,11 +503,14 @@ static int read_step(void)
 	int fd = -1;
 	unsigned long long got = 0;
 	char c = 0;
-	if (sc4(801, (long)"/dev_hdd0/openpak/step.txt", 0, (long)&fd, 0) != 0) return 'a';
+	if (sc4(801, (long)"/dev_hdd0/openpak/steptest.cfg", 0, (long)&fd, 0) != 0) return 'a';
 	sc4(802, fd, (long)&c, 1, (long)&got);       /* sys_fs_read */
 	sc4(804, fd, 0, 0, 0);
+	if (got == 1 && c >= 'A' && c <= 'D') c = (char)(c + 32);
 	return (got == 1 && c >= 'a' && c <= 'd') ? c : 'a';
 }
+
+static void write_lastboot(const char *what);
 
 /* The status writer. Raw lv2 thread: own stack, raw syscalls, read-only tables only. */
 void catcher_thread(u64 arg)
@@ -517,7 +522,11 @@ void catcher_thread(u64 arg)
 	/* 120 s of "alive" lines every 5 s; step d installs the pass-through hook at 45 s. */
 	for (i = 0; i < 120 && g_run; i++) {
 		if (i % 5 == 0) tr("alive, s", (unsigned long long)i);
-		if (g_step == 'd' && i == INSTALL_DELAY_S) {
+		if (g_step == 'd' && i == INSTALL_DELAY_S && kill_switch()) {
+			tr("kill switch present at 45 s, hook not installed", 0);
+			set_state("off - kill switch openpak_nohook");
+			write_catcher_status();
+		} else if (g_step == 'd' && i == INSTALL_DELAY_S) {
 			tr("installing hook", 0);
 			if (install_catcher()) tr("hook installed, cell", mem_u32(RS_CELL_ADDR));
 			else tr("hook left out", 0);
@@ -526,6 +535,7 @@ void catcher_thread(u64 arg)
 		usleep_(1000000);
 	}
 	tr("alive window over, passed", (unsigned long long)g_passed);
+	write_lastboot("survived 120 s");
 	while (g_run) {
 		flush_status();
 		if (g_caught != lastc || g_passed != lastp) {
@@ -557,12 +567,47 @@ static int start_catcher_thread(void)
 }
 
 /* PRX module entry points, exported by NID from module.S. */
+/* One-shot: take the boot list away before anything else, so the next power cycle boots clean. */
+static long g_rn = -1, g_ul = 1;
+
+static void disarm_boot_list(void)
+{
+	sc4(814, (long)"/dev_hdd0/boot_plugins.off", 0, 0, 0);                                   /* sys_fs_unlink */
+	g_rn = sc4(812, (long)"/dev_hdd0/boot_plugins.txt", (long)"/dev_hdd0/boot_plugins.off", 0, 0); /* sys_fs_rename */
+	if (g_rn != 0) g_ul = sc4(814, (long)"/dev_hdd0/boot_plugins.txt", 0, 0, 0);            /* fall back: delete it */
+}
+
+/* /dev_hdd0/openpak/lastboot.txt: one line, so even a step that freezes leaves evidence. */
+static void write_lastboot(const char *what)
+{
+	char b[128];
+	int n = 0;
+	long long sec = 0, nsec = 0;
+	sc4(145, (long)&sec, (long)&nsec, 0, 0);
+	n = put_str(b, n, "time="); n = put_num(b, n, (unsigned long)sec);
+	n = put_str(b, n, " step="); b[n++] = (char)g_step;
+	n = put_str(b, n, " rename="); n = put_num(b, n, g_rn == 0 ? 0 : 1);
+	n = put_str(b, n, " unlink="); n = put_num(b, n, g_ul == 0 ? 0 : 1);
+	n = put_str(b, n, " "); n = put_str(b, n, what);
+	b[n++] = '\n';
+	write_file("/dev_hdd0/openpak/lastboot.txt", b, n, 0);
+}
+
 int module_start(u64 args, const void *argp)
 {
 	(void)argp;
+	(void)args;
+	disarm_boot_list();                       /* FIRST: this boot only */
 	g_step = read_step();
 	tr("module_start, step", (unsigned long long)g_step);
-	(void)args;
+	tr("boot list renamed (0 ok)", (unsigned long long)g_rn);
+	if (kill_switch()) {
+		tr("kill switch openpak_nohook present, doing nothing", 0);
+		set_state("off - kill switch openpak_nohook");
+		write_lastboot("kill-switch");
+		return SYS_PRX_RESIDENT;
+	}
+	write_lastboot("started");
 	if (g_step >= 'c') {
 		apply_pokes();
 		tr("pokes done, applied", (unsigned long long)g_pk[0]);
