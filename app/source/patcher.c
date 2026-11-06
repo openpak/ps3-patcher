@@ -1196,3 +1196,58 @@ bool op_disable_boot_plugin(char *err, int err_len)
 	logf_("boot_plugins.txt renamed to boot_plugins.off");
 	return true;
 }
+
+
+/* ---- step test (v0.2.18-st) ---------------------------------------------------------------- */
+#define OPENPAK_STEP_FILE OPENPAK_DIR "/step.txt"
+#define OPENPAK_STEP_LOG  OPENPAK_DIR "/steptest.log"
+
+void op_steplog(const char *fmt, ...)
+{
+	char line[320], msg[256];
+	va_list ap;
+	s32 fd;
+	u64 w;
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
+	snprintf(line, sizeof(line), "[%lld] app %s\n", (long long)time(NULL), msg);
+	sysFsMkdir(OPENPAK_DIR, 0777);
+	if (sysFsOpen(OPENPAK_STEP_LOG, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_APPEND, &fd, NULL, 0) == 0) {
+		sysFsWrite(fd, line, strlen(line), &w);
+		sysFsClose(fd);
+	}
+}
+
+/* Load the plugin for this session in step mode `step` (a..d). Refuses when Cobra's PS3MAPI does not
+ * answer normally (core version 0 was seen in the session that froze; a normal Cobra 8.5 says 0x124). */
+bool op_step_load(char step, char *err, int err_len)
+{
+	s32 core;
+	int ret = 0, slot = -1;
+	bool ok;
+	u64 w;
+	s32 fd;
+
+	{ lv2syscall6(8, 0x7777, 0x11, 0, 0, 0, 0); core = (s32)p1; }
+	op_steplog("step %c requested, PS3MAPI core version 0x%08x", step, (unsigned)core);
+	if (core <= 0) {
+		snprintf(err, err_len, "Cobra is not answering normally (PS3MAPI core version 0x%08x). Nothing was "
+			 "loaded. Restart the console and try again.", (unsigned)core);
+		return false;
+	}
+	sysFsUnlink(OPENPAK_PLUGIN_LOG);
+	sysFsUnlink(OPENPAK_CATCHER_STATUS);
+	if (sysFsOpen(OPENPAK_STEP_FILE, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, &fd, NULL, 0) != 0) {
+		snprintf(err, err_len, "Could not write %s.", OPENPAK_STEP_FILE);
+		return false;
+	}
+	sysFsWrite(fd, &step, 1, &w);
+	sysFsClose(fd);
+	op_steplog("step %c: calling Cobra load", step);
+	ok = op_load_plugin(&ret, &slot);
+	op_steplog("step %c: Cobra load returned 0x%08x slot %d (%s) %s", step, (unsigned)ret, slot,
+		   ok ? "loaded" : "not loaded", op_load_report());
+	if (!ok) { snprintf(err, err_len, "Not loaded (0x%08x): %s", (unsigned)ret, op_load_report()); return false; }
+	return true;
+}

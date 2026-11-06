@@ -99,12 +99,22 @@ static volatile int g_tr_n __attribute__((section(".data.rel.ro"))) = 0;
 
 static void tr(const char *what, unsigned long long v)
 {
-	char b[96];
+	char b[120];
 	int n = 0, k, fd = -1;
 	unsigned long long wrote = 0;
 	static const char hex[] = "0123456789abcdef";
 
-	b[n++] = '1';
+	{   /* seconds since the epoch (sys_time_get_current_time, syscall 145), so the log shows timing */
+		long long sec = 0, nsec = 0;
+		char t[24];
+		int q = 0;
+		unsigned long long v2;
+		sc4(145, (long)&sec, (long)&nsec, 0, 0);
+		v2 = (unsigned long long)sec;
+		if (!v2) t[q++] = '0';
+		while (v2) { t[q++] = (char)('0' + v2 % 10); v2 /= 10; }
+		while (q) b[n++] = t[--q];
+	}
 	b[n++] = ' ';
 	{ int c = ++g_tr_n; b[n++] = (char)('0' + (c / 10) % 10); b[n++] = (char)('0' + c % 10); }
 	b[n++] = ' ';
@@ -476,25 +486,46 @@ static void flush_caught(u32 *seen)
 	}
 }
 
+/* ---- step test (v0.2.18-st) -------------------------------------------------------------------
+ * The app writes one letter to /dev_hdd0/openpak/step.txt before it loads this module for the
+ * session (never at boot), so one console session tests one more piece than the last:
+ *   a  module_start only: no pokes, no thread
+ *   b  + the thread (alive line every 5 s, nothing else)
+ *   c  + the CA trust pokes written into the running vsh
+ *   d  + the pass-through res_send hook, installed by the thread 45 s after load
+ * Missing or unreadable file = a (the least). */
+static volatile int g_step __attribute__((section(".data.rel.ro"))) = 'a';
+
+static int read_step(void)
+{
+	int fd = -1;
+	unsigned long long got = 0;
+	char c = 0;
+	if (sc4(801, (long)"/dev_hdd0/openpak/step.txt", 0, (long)&fd, 0) != 0) return 'a';
+	sc4(802, fd, (long)&c, 1, (long)&got);       /* sys_fs_read */
+	sc4(804, fd, 0, 0, 0);
+	return (got == 1 && c >= 'a' && c <= 'd') ? c : 'a';
+}
+
 /* The status writer. Raw lv2 thread: own stack, raw syscalls, read-only tables only. */
 void catcher_thread(u64 arg)
 {
 	u32 seen = 0, lastc = 0xffffffffu, lastp = 0xffffffffu;
 	int i;
 	(void)arg;
-	tr("catcher thread entered", 0);
-	set_state("waiting for the XMB");
-	/* Install only after the XMB has finished starting (v0.2.17 installed in module_start and froze it). */
-	for (i = 0; i < INSTALL_DELAY_S && g_run; i++) {
-		flush_status();
-		if (i % 5 == 0) write_catcher_status();
+	tr("thread entered, step", (unsigned long long)g_step);
+	/* 120 s of "alive" lines every 5 s; step d installs the pass-through hook at 45 s. */
+	for (i = 0; i < 120 && g_run; i++) {
+		if (i % 5 == 0) tr("alive, s", (unsigned long long)i);
+		if (g_step == 'd' && i == INSTALL_DELAY_S) {
+			tr("installing hook", 0);
+			if (install_catcher()) tr("hook installed, cell", mem_u32(RS_CELL_ADDR));
+			else tr("hook left out", 0);
+			write_catcher_status();
+		}
 		usleep_(1000000);
 	}
-	if (g_run) {
-		if (install_catcher()) tr("catcher installed late, cell", mem_u32(RS_CELL_ADDR));
-		else tr("catcher left out", 0);
-		write_catcher_status();
-	}
+	tr("alive window over, passed", (unsigned long long)g_passed);
 	while (g_run) {
 		flush_status();
 		if (g_caught != lastc || g_passed != lastp) {
@@ -529,19 +560,19 @@ static int start_catcher_thread(void)
 int module_start(u64 args, const void *argp)
 {
 	(void)argp;
-	/* one short beep (sys_sm_ring_buzzer) + a log line, so a restart shows the start entry runs */
-	sc4(392, 0x1004, 0x4, 0x6, 0);
-	tr("module_start called, args", args);
-	apply_pokes();
-	tr("pokes done, applied", (unsigned long long)g_pk[0]);
-
+	g_step = read_step();
+	tr("module_start, step", (unsigned long long)g_step);
+	(void)args;
+	if (g_step >= 'c') {
+		apply_pokes();
+		tr("pokes done, applied", (unsigned long long)g_pk[0]);
+	}
 	build_list();
-	tr("catcher families", (unsigned long long)g_list.n);
-	if (g_pk[0] && g_pk[0] == g_pk[2]) { usleep_(700000); sc4(392, 0x1004, 0x7, 0x36, 0); }
-	/* The hook is installed by the thread, INSTALL_DELAY_S after boot, never here. */
-	if (start_catcher_thread() != 0) { tr("catcher thread create failed", 0); set_state("off - thread did not start"); }
-	else tr("catcher thread started", 0);
-
+	set_state(g_step == 'd' ? "waiting for the XMB" : "step test, no hook");
+	if (g_step >= 'b') {
+		if (start_catcher_thread() != 0) { tr("thread create failed", 0); set_state("off - thread did not start"); }
+		else tr("thread started", 0);
+	}
 	tr("module_start returns", 0);
 	return SYS_PRX_RESIDENT;   /* stay resident so the pokes and the hook persist */
 }

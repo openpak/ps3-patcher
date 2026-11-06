@@ -319,26 +319,34 @@ static bool steps(void)
 		}
 	}
 	if (q.plugin_matches && !q.listed && !want_exit) {
-		if (ask(true, "Pass-through test: load the plugin now, for this session only?\n\nIt is not added to "
-			      "the boot list. About 45 s later it installs a hook that only counts lookups and changes "
-			      "nothing. If the console freezes, hold the power button until it turns off and turn it on "
-			      "again: nothing loads at boot.")) {
-			int ret = 0, slot = -1;
+		/* v0.2.18-st: one step per session, for this session only (never the boot list). */
+		static const struct { char step; const char *text; } st[4] = {
+			{ 'a', "Step A: load the plugin only (no pokes, no thread)?" },
+			{ 'b', "Step B: load the plugin with its thread (logs \"alive\" every 5 s, nothing else)?" },
+			{ 'c', "Step C: thread + the CA trust pokes into the running console?" },
+			{ 'd', "Step D: thread + pokes + the pass-through hook (installed 45 s after loading)?" },
+		};
+		int k;
+		ask(false, "Step test: one step per console session, in order A, B, C, D. Each loads the plugin "
+			   "for this session only (never at boot). After each step, wait for the result, then restart "
+			   "the console before the next one. If the console freezes, hold power to turn it off and "
+			   "turn it on again: nothing loads at boot.");
+		for (k = 0; k < 4 && !want_exit; k++) {
 			char msg[480];
-			bool ok = op_load_plugin(&ret, &slot);
-			snprintf(msg, sizeof(msg), "%s (slot %d, return 0x%08x).\n\nUse the XMB normally for a few minutes "
-				 "(open a website or the store), then open this app again and choose \"Show full status\". "
-				 "It should say: DNS catcher: pass-through test (installed, nothing redirected).",
-				 ok ? "Plugin loaded for this session" : "The plugin did not load", slot, (unsigned)ret);
+			int sec;
+			if (!ask(true, st[k].text)) continue;
+			if (!op_step_load(st[k].step, err, sizeof(err))) { ask(false, err); return false; }
+			ask(false, "Loaded. Press OK, then do not touch anything for 2 minutes. A result appears at "
+				   "the end.");
+			/* 120 s alive loop: the app logs every 5 s; the plugin logs its own lines */
+			for (sec = 0; sec <= 120 && !want_exit; sec++) {
+				if (sec % 5 == 0) op_steplog("step %c: app alive t=%d", st[k].step, sec);
+				{ int f; for (f = 0; f < 60 && !want_exit; f++) { sysUtilCheckCallback(); present(); } }
+			}
+			op_steplog("step %c: 120 s passed", st[k].step);
+			snprintf(msg, sizeof(msg), "Step %c survived 2 minutes.\n\nRestart the console, then run the next "
+				 "step. Logs: /dev_hdd0/openpak/steptest.log and plugin.log", st[k].step - 32);
 			ask(false, msg);
-			return false;
-		}
-		if (!want_exit && ask(true, "Enable the boot plugin?\n\nOnly do this after the pass-through test showed "
-					   "\"pass-through test (installed ...)\" and the console kept working. The plugin "
-					   "then loads at every start.")) {
-			if (!op_enable_boot_plugin(err, sizeof(err))) ask(false, err);
-			else ask(false, "Boot plugin enabled. Restart the console to load it. Safety switch: an empty "
-					"file named openpak_nohook in the root of a USB stick keeps the hook off.");
 			return false;
 		}
 	}
@@ -419,7 +427,7 @@ int main(int argc, char **argv)
 	/* The plugin is installed and current but Cobra has not loaded it (an outdated install is updated first,
 	 * because "Load it now" would only load the old files): offer to load it now, and show the raw
 	 * return code of Cobra's load call (0 = loaded). */
-	if (s.plugin_file && !s.plugin_loaded && !s.update_needed) {
+	if (0 && s.plugin_file && !s.plugin_loaded && !s.update_needed) {   /* v0.2.18-st: load only via the step test */
 		strncat(text, "\n\nThe plugin is not loaded. Load it now?", sizeof(text) - strlen(text) - 1);
 		if (ask(true, text)) {
 			int ret = 0, slot = -1;

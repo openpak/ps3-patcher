@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.18-st (step test, nothing loads at boot)
+
+- pt.1's "load now" froze the console. plugin.log: module_start ran, applied the 4 CA pokes to the running
+  vsh, started the thread and returned; the thread never reached the 45 s hook install. The app logged no
+  return from Cobra's load call, and that session's PS3MAPI answered abnormally (core version 0, every
+  slot ret 0) where a normal boot answers 0x124 / ENOENT.
+- Step test, one piece per console session, loaded for the session only via Cobra (never the boot list):
+  A module only; B + thread ("alive" every 5 s); C + CA pokes into the running vsh; D + pass-through hook
+  at 45 s. The app writes the step to /dev_hdd0/openpak/step.txt, refuses to load when PS3MAPI's core
+  version is 0, then stays alive 120 s logging every 5 s to steptest.log. plugin.log lines now carry epoch
+  seconds. The boot-plugin enable step and the status screen's "Load it now" are removed in this build.
+
 ## v0.2.18-pt.1 (app start-up without probes, safe mode, explicit boot-list step)
 
 - v0.2.18-pt's app froze the console at launch (blank screen) while the v0.2.17 plugin was still loaded
