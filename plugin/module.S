@@ -83,42 +83,17 @@ openpak_opd_catcher:
 openpak_opd_qhook:
 	.int .openpak_qhook
 	.int 0
+	/* A pure-asm hook that returns res_goahead and touches no TOC and no global (step d): tests whether
+	 * res_send can call through our descriptor at all, with nothing else in the path. */
+	.globl openpak_opd_qnoop
+openpak_opd_qnoop:
+	.int .openpak_qnoop
+	.int 0
 
-	/* Call the original (firmware) qhook, whose 8-byte {u32 entry, u32 toc} descriptor address is in
-	 * r3; the six real qhook arguments are in r4..r9. The firmware's descriptors are the 8-byte kind,
-	 * so a plain C indirect call (ELFv1, 24-byte, r2 at +8) would not work -- this reads {entry, toc}
-	 * the way res_send itself does and preserves our module TOC (r2) across the call. Written as a
-	 * normal ELFv1 asm function (24-byte .opd via .TOC.@tocbase, as the C functions get), so the C
-	 * caller reaches it with the ordinary ABI.
-	 *   long openpak_call_qhook(u32 opd, void *ns, void *query, void *querylen, void *ans, int anssiz, void *resplen) */
-	.section .opd, "aw"
-	.align 3
-	.globl openpak_call_qhook
-	.type openpak_call_qhook, @function
-openpak_call_qhook:
-	.quad .openpak_call_qhook, .TOC.@tocbase, 0
-
+	/* int openpak_qnoop(...): return res_goahead (0). No frame, no r2, no memory. */
 	.section .text
 	.align 2
-	.globl .openpak_call_qhook
-.openpak_call_qhook:
-	mflr 0
-	std 0, 16(1)
-	stdu 1, -128(1)
-	std 2, 112(1)          /* save our TOC */
-	mr 11, 3               /* original descriptor */
-	mr 3, 4               /* ns */
-	mr 4, 5               /* query */
-	mr 5, 6               /* querylen */
-	mr 6, 7               /* ans */
-	mr 7, 8               /* anssiz */
-	mr 8, 9               /* resplen */
-	lwz 0, 0(11)          /* entry */
-	lwz 2, 4(11)          /* callee toc (u32) */
-	mtctr 0
-	bctrl
-	ld 2, 112(1)          /* restore our TOC */
-	addi 1, 1, 128
-	ld 0, 16(1)
-	mtlr 0
+	.globl .openpak_qnoop
+.openpak_qnoop:
+	li 3, 0
 	blr

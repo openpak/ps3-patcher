@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.18-st2 (hook call isolated: no-op / count / catch)
+
+- Step D (boot-time pass-through hook) froze on the first lookup; the install was fine (cell set to our
+  descriptor) and the thread stayed alive 15 s past it, so the freeze is the first call into our hook and
+  passed never left 0. Static check of the built PRX: the qhook descriptor, its toc and the g_passed GOT
+  entry are all correctly relocated, identical to the thread that ran fine - so the cause is not visible
+  statically. One real latent bug found and removed: the hand-written ELFv1 .opd for the chain trampoline
+  (openpak_call_qhook) had entry=0 with no relocation (elf2prx dropped it); the chain is removed entirely
+  (non-matching names return res_goahead, which equals no hook for that query, so chaining is unnecessary).
+- Hook steps split to isolate the call: D installs a pure-asm hook (li r3,0; blr - no frame, no TOC, no
+  global) to test whether res_send can call through our descriptor at all; E installs the C hook that does
+  g_passed++ then res_goahead (a TOC + global write from res_send's thread); F is the C hook with catching
+  (match -> box IP via res_done, others pass through). One step per boot, hook installed 45 s in.
+
 ## v0.2.18-bt (boot-time one-shot step test)
 
 - Step A of v0.2.18-st froze the console: plugin.log shows module_start ran and returned in the same second,

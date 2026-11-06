@@ -263,6 +263,8 @@ static void apply_pokes(void)
 	g_pk[3] = write_status(applied, verified, total) != 0;
 }
 
+static volatile int g_step __attribute__((section(".data.rel.ro"))) = 'a';
+
 /* ---- DNS catcher ------------------------------------------------------------------------------
  * res_send and its Qhook, 4.93 retail CEX vsh.self (docs/dns-catcher.md). The guard below checks
  * every one of these before writing anything; on any mismatch the hook is left out. */
@@ -298,8 +300,7 @@ static void apply_pokes(void)
 
 /* Descriptor res_send calls (module.S), and the trampoline that calls the saved original (module.S). */
 extern const u32 openpak_opd_qhook[2];
-extern long openpak_call_qhook(u32 opd, void *ns, void *query, void *querylen,
-			       void *ans, int anssiz, void *resplen);
+extern const u32 openpak_opd_qnoop[2];
 
 static catcher_list g_list;
 static volatile int g_run __attribute__((section(".data.rel.ro"))) = 1;
@@ -322,27 +323,25 @@ static volatile u32 g_ring_w __attribute__((section(".data.rel.ro"))) = 0;
 int openpak_qhook(unsigned char **ns, unsigned char **query, int *querylen,
 		  unsigned char *ans, int anssiz, int *resplen)
 {
-#if OPENPAK_PASSTHROUGH
-	(void)ns; (void)query; (void)querylen; (void)ans; (void)anssiz; (void)resplen;
-	g_passed++;
-	return CATCHER_GOAHEAD;
-#else
-	char name[CATCHER_NAME];
-	int hit = -1, r;
-
-	r = catcher_handle(&g_list, *query, *querylen, ans, anssiz, name, &hit);
-	if (r > 0) {
-		unsigned int w = g_ring_w, i;
-		*resplen = r;
-		g_caught++;
-		for (i = 0; i + 1 < RING_W && name[i]; i++) g_ring[w % RING_N][i] = name[i];
-		g_ring[w % RING_N][i] = 0;
-		g_ring_w = w + 1;
-		return CATCHER_DONE;
+	(void)ns;
+	if (g_step == 'f') {
+		char name[CATCHER_NAME];
+		int hit = -1, r;
+		r = catcher_handle(&g_list, *query, *querylen, ans, anssiz, name, &hit);
+		if (r > 0) {
+			unsigned int w = g_ring_w, i;
+			*resplen = r;
+			g_caught++;
+			for (i = 0; i + 1 < RING_W && name[i]; i++) g_ring[w % RING_N][i] = name[i];
+			g_ring[w % RING_N][i] = 0;
+			g_ring_w = w + 1;
+			return CATCHER_DONE;
+		}
+	} else {
+		(void)query; (void)querylen; (void)ans; (void)anssiz; (void)resplen;
 	}
-	g_passed++;
-	return (int)openpak_call_qhook(g_orig_opd, ns, query, querylen, ans, anssiz, resplen);
-#endif
+	g_passed++;                 /* every non-caught name: count and pass to the console's own DNS */
+	return CATCHER_GOAHEAD;
 }
 
 static void build_list(void)
@@ -405,18 +404,18 @@ static int install_catcher(void)
 	}
 	{
 		u32 cell = mem_u32(RS_CELL_ADDR);
-		if (cell == (u32)(u64)openpak_opd_qhook) { g_orig_opd = RS_CELL_DEF; set_state(OPENPAK_PASSTHROUGH ? "pass-through test" : "on"); return 1; }
+		if (cell == (u32)(u64)openpak_opd_qhook || cell == (u32)(u64)openpak_opd_qnoop) { g_orig_opd = RS_CELL_DEF; set_state("hook test"); return 1; }
 		if (cell != RS_CELL_DEF) { tr("catcher cell occupied", cell); set_state("off - another hook present"); return 0; }
 	}
 
 	g_orig_opd = RS_CELL_DEF;
-	my = (u32)(u64)openpak_opd_qhook;
+	my = (u32)(u64)(g_step == 'd' ? openpak_opd_qnoop : openpak_opd_qhook);
 	if (mem_set(RS_CELL_ADDR, &my, 4) != 0 || mem_u32(RS_CELL_ADDR) != my) {
 		set_state("off - install write failed");
 		return 0;
 	}
 	tr("catcher installed, opd", my);
-	set_state(OPENPAK_PASSTHROUGH ? "pass-through test" : "on");
+	set_state("hook test");
 	return 1;
 }
 
@@ -494,9 +493,10 @@ static void flush_caught(u32 *seen)
  *   a  module_start only: no pokes, no thread
  *   b  + the thread (alive line every 5 s, nothing else)
  *   c  + the CA trust pokes written into the running vsh
- *   d  + the pass-through res_send hook, installed by the thread 45 s after load
+ *   d  + install a pure-asm res_send hook that returns res_goahead and touches no TOC/global
+ *   e  + the C hook: it does g_passed++ then res_goahead (tests a global write from res_send)
+ *   f  + the C hook with catching: matching names get the box IP, others pass through
  * Missing or unreadable file = a (the least). */
-static volatile int g_step __attribute__((section(".data.rel.ro"))) = 'a';
 
 static int read_step(void)
 {
@@ -506,8 +506,8 @@ static int read_step(void)
 	if (sc4(801, (long)"/dev_hdd0/openpak/steptest.cfg", 0, (long)&fd, 0) != 0) return 'a';
 	sc4(802, fd, (long)&c, 1, (long)&got);       /* sys_fs_read */
 	sc4(804, fd, 0, 0, 0);
-	if (got == 1 && c >= 'A' && c <= 'D') c = (char)(c + 32);
-	return (got == 1 && c >= 'a' && c <= 'd') ? c : 'a';
+	if (got == 1 && c >= 'A' && c <= 'F') c = (char)(c + 32);
+	return (got == 1 && c >= 'a' && c <= 'f') ? c : 'a';
 }
 
 static void write_lastboot(const char *what);
@@ -522,12 +522,12 @@ void catcher_thread(u64 arg)
 	/* 120 s of "alive" lines every 5 s; step d installs the pass-through hook at 45 s. */
 	for (i = 0; i < 120 && g_run; i++) {
 		if (i % 5 == 0) tr("alive, s", (unsigned long long)i);
-		if (g_step == 'd' && i == INSTALL_DELAY_S && kill_switch()) {
+		if (g_step >= 'd' && i == INSTALL_DELAY_S && kill_switch()) {
 			tr("kill switch present at 45 s, hook not installed", 0);
 			set_state("off - kill switch openpak_nohook");
 			write_catcher_status();
-		} else if (g_step == 'd' && i == INSTALL_DELAY_S) {
-			tr("installing hook", 0);
+		} else if (g_step >= 'd' && i == INSTALL_DELAY_S) {
+			tr("installing hook, step", (unsigned long long)g_step);
 			if (install_catcher()) tr("hook installed, cell", mem_u32(RS_CELL_ADDR));
 			else tr("hook left out", 0);
 			write_catcher_status();
@@ -613,7 +613,7 @@ int module_start(u64 args, const void *argp)
 		tr("pokes done, applied", (unsigned long long)g_pk[0]);
 	}
 	build_list();
-	set_state(g_step == 'd' ? "waiting for the XMB" : "step test, no hook");
+	set_state(g_step >= 'd' ? "waiting for the XMB" : "step test, no hook");
 	if (g_step >= 'b') {
 		if (start_catcher_thread() != 0) { tr("thread create failed", 0); set_state("off - thread did not start"); }
 		else tr("thread started", 0);
