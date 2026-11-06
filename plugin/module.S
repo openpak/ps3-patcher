@@ -83,17 +83,4 @@ openpak_opd_catcher:
 openpak_opd_qhook:
 	.int .openpak_qhook
 	.int 0
-	/* A pure-asm hook that returns res_goahead and touches no TOC and no global (step d): tests whether
-	 * res_send can call through our descriptor at all, with nothing else in the path. */
-	.globl openpak_opd_qnoop
-openpak_opd_qnoop:
-	.int .openpak_qnoop
-	.int 0
 
-	/* int openpak_qnoop(...): return res_goahead (0). No frame, no r2, no memory. */
-	.section .text
-	.align 2
-	.globl .openpak_qnoop
-.openpak_qnoop:
-	li 3, 0
-	blr

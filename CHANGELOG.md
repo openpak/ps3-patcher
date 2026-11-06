@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.18
+
+- First real-console PSN sign-in on OpenPak (2026-11-06): np-account logged bindAccount 200,
+  `np native sign-in online_id=PS3Test`, and `/nav/auth` 200 `ps3_status=OK`.
+- The DNS catcher ships as the normal boot plugin: loaded every boot from boot_plugins.txt, the hook
+  installed 45 s after the XMB starts (a lookup in those first seconds still goes to the console's own
+  DNS), the signed ps3 list verified at build, and the kill switch (openpak_nohook on USB or
+  /dev_hdd0/openpak/nohook, checked at boot and again before the install).
+- The hook answers a matching PlayStation name itself with the box address (res_done); every other name
+  passes through. res_send's argument slots are 32-bit words, read with lwz and written with stw (the
+  st2/st3 freezes were a 64-bit read of the 32-bit query slot and a zero-entry chain descriptor; the
+  chain is gone - a non-match returns res_goahead, which equals no hook for that query).
+- catcher.caught.log is timestamped and capped per boot, so a single action (sign-in, the clock's "Set
+  via Internet", which is a caught community.playstation.net name) can be matched to its lookups.
+- The step-test machinery and session loading are removed. The app does a normal install then enable,
+  both guarded by the plugin file's hash.
+- Evilnat's anti-ban guard shows "PlayStation Network: Disabled" while CFW syscalls are enabled. After
+  the hook is in (about a minute after boot), Evilnat Basic Tools -> Disable syscalls makes PSN show
+  enabled; the plugin needs no CFW syscall after the install, so this is safe. An automatic bypass is a
+  separate, hardware-tested change (card to follow).
+
 ## v0.2.18-st3 (Step F root cause: 64-bit read of a 32-bit query slot)
 
 - st2 ladder: D (bare asm hook) and E (count + pass-through) survived; F froze at the first lookup after

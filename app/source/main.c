@@ -319,40 +319,23 @@ static bool steps(void)
 		}
 	}
 	if (q.plugin_matches && !want_exit) {
-		char res[400], msg[480];
-		op_step_result(res, sizeof(res));
-		if (q.listed) {
-			/* a step is armed for the next boot */
-			snprintf(msg, sizeof(msg), "A step is armed for the next boot (boot_plugins.txt names OpenPak; the "
-				 "plugin removes that line itself as soon as it starts).\n\n%s\n\nRestart now?", res);
-			if (ask(true, msg)) { op_reboot(); sleep(10); return false; }
-			if (ask(true, "Disarm it instead (rename boot_plugins.txt to boot_plugins.off)?")) {
-				if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);
-				else ask(false, "Disarmed. Nothing loads at the next boot.");
+		if (!q.listed) {
+			if (ask(true, "OpenPak is ready. Enable it at the next boot?\n\nThe plugin loads at every boot "
+				      "and installs its redirect 45 s after the XMB starts.")) {
+				if (!op_enable_boot_plugin(err, sizeof(err))) { ask(false, err); return false; }
+				ask(false, "Enabled. Restart the console, wait for the XMB, then sign in under PlayStation "
+					   "Network.\n\nIf the XMB shows \"PlayStation Network: Disabled\", wait about a "
+					   "minute after boot (so the redirect is in), then use Evilnat Basic Tools -> "
+					   "Disable syscalls. Safety switch: an empty openpak_nohook file on a USB stick keeps "
+					   "the redirect off.");
+				if (ask(true, "Restart now?")) { op_reboot(); sleep(10); }
+				return false;
 			}
-			return false;
-		}
-		/* v0.2.18-bt: one boot-time, one-shot step per restart */
-		{
-			static const struct { char step; const char *text; } st[7] = {
-				{ 'a', "Step A at the next boot: the plugin only (no pokes, no thread)?" },
-				{ 'b', "Step B at the next boot: plugin + thread (logs \"alive\" every 5 s)?" },
-				{ 'c', "Step C at the next boot: thread + the CA trust pokes?" },
-				{ 'd', "Step D at the next boot: install a bare hook (returns at once, touches nothing) at 45 s?" },
-				{ 'e', "Step E at the next boot: hook that counts each lookup and passes it through?" },
-				{ 'f', "Step F at the next boot: redirect PlayStation names (answered by the console) and pass the rest?" },
-				{ 'g', "Step G at the next boot: redirect PlayStation names (asked of OpenPak DNS) and pass the rest?" },
-			};
-			int k;
-			snprintf(msg, sizeof(msg), "Step test (boot-time, one boot only). Each step is armed for the "
-				 "next boot and removes itself as it starts, so a freeze clears with a power cycle.\n\n%s",
-				 res);
-			ask(false, msg);
-			for (k = 0; k < 7 && !want_exit; k++) {
-				if (!ask(true, st[k].text)) continue;
-				if (!op_step_arm(st[k].step, err, sizeof(err))) { ask(false, err); return false; }
-				if (ask(true, "Armed. Restart the console now? After it starts, wait 2 minutes on the XMB, then "
-					      "open this app again to see the result.")) { op_reboot(); sleep(10); }
+		} else {
+			if (ask(true, "OpenPak is enabled at boot. Turn it off (rename boot_plugins.txt to "
+				      "boot_plugins.off)?")) {
+				if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);
+				else ask(false, "Turned off. Restart the console.");
 				return false;
 			}
 		}

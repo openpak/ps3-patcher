@@ -123,3 +123,15 @@ already gone, so it boots clean. An empty `openpak_nohook` file in the root of t
 plugin loads. Then rename `boot_plugins.txt` with the file manager and turn Cobra back on with Evilnat's
 Toggle Cobra.
 
+## PlayStation Network shows "Disabled" (Evilnat anti-ban guard)
+
+Evilnat blocks PSN while CFW syscalls are enabled and shows "PlayStation Network: Disabled -- Disable
+syscalls to log in". On OpenPak that guard is pointless. After OpenPak is enabled and the console has
+booted, **wait about a minute** (so the redirect has installed, 45 s after the XMB), then use
+**Evilnat Basic Tools -> Disable syscalls** (or webMAN "Remove CFW syscalls"). PSN then shows enabled
+and sign-in works.
+
+This is safe: the OpenPak plugin uses CFW syscall 8 only to apply the CA pokes and install the hook,
+both of which are done by the time you disable syscalls. The hook runs inside the resolver with no
+syscalls, and the patches stay in memory. Do **not** disable syscalls in the first 45 s after boot, or
+the hook's install (which needs syscall 8) is skipped for that boot -- it reinstalls on the next boot.

@@ -1168,16 +1168,6 @@ bool op_install_plugin_file(char *err, int err_len)
  * this package carries (the pass-through build), so a v0.2.17 file can never be put back in the list. */
 bool op_enable_boot_plugin(char *err, int err_len)
 {
-	u64 len = 0;
-	unsigned char *st = read_all(OPENPAK_CATCHER_STATUS, 1024, &len);
-	bool tested = st && len > 6 && strncmp((char *)st, "state=pass-through test", 23) == 0;
-	free(st);
-	if (!tested) {
-		snprintf(err, err_len, "Not enabled: there is no record of a pass-through test with this plugin. "
-			 "Run \"Pass-through test: load the plugin now\" first, use the console for a few minutes, "
-			 "then come back.");
-		return false;
-	}
 	if (!plugin_matches_bundle()) {
 		snprintf(err, err_len, "The plugin file on disk is not the one in this package. Install the plugin "
 			 "file first; the boot list was not changed.");
@@ -1202,100 +1192,4 @@ bool op_disable_boot_plugin(char *err, int err_len)
 	}
 	logf_("boot_plugins.txt renamed to boot_plugins.off");
 	return true;
-}
-
-
-/* ---- step test (v0.2.18-st) ---------------------------------------------------------------- */
-#define OPENPAK_STEP_FILE OPENPAK_DIR "/step.txt"
-#define OPENPAK_STEP_LOG  OPENPAK_DIR "/steptest.log"
-
-void op_steplog(const char *fmt, ...)
-{
-	char line[320], msg[256];
-	va_list ap;
-	s32 fd;
-	u64 w;
-	va_start(ap, fmt);
-	vsnprintf(msg, sizeof(msg), fmt, ap);
-	va_end(ap);
-	snprintf(line, sizeof(line), "[%lld] app %s\n", (long long)time(NULL), msg);
-	sysFsMkdir(OPENPAK_DIR, 0777);
-	if (sysFsOpen(OPENPAK_STEP_LOG, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_APPEND, &fd, NULL, 0) == 0) {
-		sysFsWrite(fd, line, strlen(line), &w);
-		sysFsClose(fd);
-	}
-}
-
-/* v0.2.18-bt: arm one boot-time step. Writes steptest.cfg and a boot_plugins.txt holding only our
- * line; the plugin renames that list away as the first thing in module_start, so it loads for exactly
- * one boot. Never loads anything into the running console (Cobra's session load hangs this console). */
-#define OPENPAK_LASTBOOT OPENPAK_DIR "/lastboot.txt"
-
-bool op_step_arm(char step, char *err, int err_len)
-{
-	u64 len = 0, i = 0;
-	unsigned char *buf;
-	char line[96];
-	int n;
-
-	if (!plugin_matches_bundle()) {
-		snprintf(err, err_len, "The plugin file on disk is not this package's. Install the plugin file first.");
-		return false;
-	}
-	buf = exists(OPENPAK_BOOT_LIST) ? read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len) : NULL;
-	while (buf && i < len) {
-		u64 j = i, k;
-		bool blank = true;
-		while (j < len && buf[j] != '\n') j++;
-		for (k = i; k < j; k++) if (buf[k] != ' ' && buf[k] != '\t' && buf[k] != '\r') blank = false;
-		if (!blank && !is_our_line(buf + i, (size_t)(j - i))) {
-			free(buf);
-			snprintf(err, err_len, "boot_plugins.txt lists another plugin. Remove it first; nothing was armed.");
-			return false;
-		}
-		i = j + 1;
-	}
-	free(buf);
-
-	sysFsUnlink(OPENPAK_PLUGIN_LOG);
-	sysFsUnlink(OPENPAK_CATCHER_STATUS);
-	sysFsUnlink(OPENPAK_LASTBOOT);
-	{
-		s32 fd;
-		u64 w;
-		if (sysFsOpen(OPENPAK_DIR "/steptest.cfg", SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, &fd, NULL, 0) != 0) {
-			snprintf(err, err_len, "Could not write steptest.cfg.");
-			return false;
-		}
-		sysFsWrite(fd, &step, 1, &w);
-		sysFsClose(fd);
-	}
-	n = snprintf(line, sizeof(line), "%s\n", OPENPAK_PLUGIN_DST);
-	if (!write_atomic(OPENPAK_BOOT_LIST, (const unsigned char *)line, (u64)n)) {
-		snprintf(err, err_len, "Could not write %s.", OPENPAK_BOOT_LIST);
-		return false;
-	}
-	op_steplog("step %c armed for the next boot (one-shot)", step);
-	return true;
-}
-
-/* Last boot's one-line result and the last plugin.log line, for the step screen. */
-void op_step_result(char *out, int out_len)
-{
-	u64 l1 = 0, l2 = 0;
-	unsigned char *a = read_all(OPENPAK_LASTBOOT, 512, &l1);
-	unsigned char *b = read_all(OPENPAK_PLUGIN_LOG, 64 * 1024, &l2);
-	const char *last = "";
-	if (b && l2) {
-		long e = (long)l2 - 1, st;
-		while (e > 0 && (b[e] == '\n' || b[e] == '\r')) b[e--] = 0;
-		st = e;
-		while (st > 0 && b[st - 1] != '\n') st--;
-		last = (const char *)b + st;
-	}
-	if (a && l1 && a[l1 - 1] == '\n') a[l1 - 1] = 0;
-	snprintf(out, out_len, "Last boot: %s\nLast plugin line: %s", a && l1 ? (char *)a : "(no record)",
-		 last[0] ? last : "(none)");
-	free(a);
-	free(b);
 }

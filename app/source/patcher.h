@@ -84,10 +84,6 @@ void op_quick_read(op_quick *q);
 bool op_install_plugin_file(char *err, int err_len);
 bool op_enable_boot_plugin(char *err, int err_len);
 bool op_disable_boot_plugin(char *err, int err_len);
-/* v0.2.18-bt step test: arm one boot-time, one-shot step a..d; log to steptest.log. */
-void op_steplog(const char *fmt, ...);
-bool op_step_arm(char step, char *err, int err_len);
-void op_step_result(char *out, int out_len);
 
 void op_status_read(op_status *s);
 bool op_is_openpak(const op_status *s);
