@@ -69,6 +69,22 @@ typedef struct {
 	bool bundle_ok;       /* CA01/CA59/sprx are in USRDIR */
 } op_status;
 
+/* File-only state for the first screen: no lv2 peek, no PS3MAPI, no vsh memory, no network. */
+typedef struct {
+	bool plugin_file;     /* /dev_hdd0/plugins/openpak_ca.sprx exists */
+	bool plugin_matches;  /* ...and is byte-for-byte the plugin this package carries */
+	bool bundle_ok;       /* the package's own copy is present */
+	bool boot_list;       /* /dev_hdd0/boot_plugins.txt exists */
+	bool listed;          /* ...and names an OpenPak plugin */
+	bool boot_list_off;   /* /dev_hdd0/boot_plugins.off exists */
+	bool nohook;          /* openpak_nohook on a USB stick, or /dev_hdd0/openpak/nohook */
+} op_quick;
+
+void op_quick_read(op_quick *q);
+bool op_install_plugin_file(char *err, int err_len);
+bool op_enable_boot_plugin(char *err, int err_len);
+bool op_disable_boot_plugin(char *err, int err_len);
+
 void op_status_read(op_status *s);
 bool op_is_openpak(const op_status *s);
       /* CA installed and plugin listed */

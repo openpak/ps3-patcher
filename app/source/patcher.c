@@ -642,6 +642,8 @@ static void build_detail(op_status *s)
  * MOD's load_vsh_plugin uses), stopping at the first that Cobra accepts. g_load_report keeps every
  * raw return value: 0 = loaded, 0x80010002 = EINVAL (missing, too short or bad slot),
  * 0x80010005 = ESRCH (no vsh process), others come from the kernel module loader. */
+static bool plugin_matches_bundle(void);
+
 bool op_load_plugin(int *ret, int *slot)
 {
 	static char name[48], file[256];
@@ -652,6 +654,13 @@ bool op_load_plugin(int *ret, int *slot)
 	*ret = 0;
 	*slot = -1;
 	g_load_report[0] = 0;
+	/* only ever load the plugin this package carries (never a leftover v0.2.17 file) */
+	if (!plugin_matches_bundle()) {
+		*ret = (int)0x80010000;
+		snprintf(g_load_report, sizeof(g_load_report), "Not loaded: the plugin file on disk is not this "
+			 "package's. Install the plugin file first.");
+		return false;
+	}
 	ps3mapi_open();
 	for (k = 0; k < 3; k++) {
 		int use = -1;
@@ -797,7 +806,6 @@ void op_status_read(op_status *s)
 			if (strcmp(res, "same")) all = false;
 			n += snprintf(g_cmp_line + n, sizeof(g_cmp_line) - n, "%s on disk %llu, in pkg %llu: %s\n", w[k].tag,
 				      (unsigned long long)il, (unsigned long long)bl, res);
-			if (!ls || !list_has_path(ls, len, w[k].inst)) all = false;      /* boot line missing */
 			free(ib);
 			free(bb);
 		}
@@ -810,7 +818,7 @@ void op_status_read(op_status *s)
 		s->plugin_current = all;
 	}
 	s->update_needed = s->installed &&
-		(strcmp(s->inst_ver, OPENPAK_VERSION) != 0 || !s->plugin_current || !s->ca_openpak || !s->plugin_listed);
+		(strcmp(s->inst_ver, OPENPAK_VERSION) != 0 || !s->plugin_current || !s->ca_openpak);
 	logf_("installed=%d version='%s' app=%s plugin_current=%d ca_openpak=%d listed=%d -> update_needed=%d",
 	      s->installed, s->inst_ver, OPENPAK_VERSION, s->plugin_current, s->ca_openpak, s->plugin_listed, s->update_needed);
 
@@ -975,9 +983,11 @@ bool op_switch_openpak(char *err, int err_len)
 			}
 		}
 	}
-	/* drop every OpenPak line first (older versions listed a third file), then add ours; other lines stay */
-	if (!boot_list_remove() || !boot_list_add()) FAIL("Could not update boot_plugins.txt.");
-	logf_("plugin installed, boot_plugins.txt updated");
+	/* v0.2.18: the boot list is never switched on here. Old OpenPak lines are dropped (a v0.2.17 line
+	 * freezes the console); adding ours is the separate, explicit op_enable_boot_plugin step, offered
+	 * only after the pass-through test has passed. */
+	if (!boot_list_remove()) FAIL("Could not update boot_plugins.txt.");
+	logf_("plugin installed, boot list left off (enable it separately)");
 
 	/* 3. dev_flash */
 	if (!exists("/dev_blind")) {
@@ -1084,4 +1094,105 @@ void op_reboot(void)
 	{
 		lv2syscall3(379, 0x0200, 0, 0);
 	}
+}
+
+
+/* ---- v0.2.18 start-up without probes ------------------------------------------------------
+ * Everything below reads and writes plain files on /dev_hdd0 and the USB stick only: no lv2 peek,
+ * no syscall 8 / PS3MAPI, no vsh memory, no network. The app's first screen is built from this. */
+
+#define OPENPAK_BOOT_LIST_OFF "/dev_hdd0/boot_plugins.off"
+
+static bool plugin_matches_bundle(void)
+{
+	u64 il = 0, bl = 0;
+	unsigned char *ib = exists(OPENPAK_PLUGIN_DST) ? read_all(OPENPAK_PLUGIN_DST, 4 * 1024 * 1024, &il) : NULL;
+	unsigned char *bb = read_all(OPENPAK_USRDIR "/openpak_ca.sprx", 4 * 1024 * 1024, &bl);
+	bool same = ib && bb && il && il == bl && memcmp(ib, bb, il) == 0;
+	free(ib);
+	free(bb);
+	return same;
+}
+
+void op_quick_read(op_quick *q)
+{
+	u64 len = 0;
+	unsigned char *st;
+	memset(q, 0, sizeof(*q));
+	q->plugin_file = exists(OPENPAK_PLUGIN_DST);
+	q->plugin_matches = plugin_matches_bundle();
+	q->bundle_ok = exists(OPENPAK_USRDIR "/openpak_ca.sprx");
+	st = read_all(OPENPAK_BOOT_LIST, MAX_LIST, &len);
+	q->boot_list = st != NULL;
+	q->listed = st && list_has_ours(st, len);
+	free(st);
+	q->boot_list_off = exists(OPENPAK_BOOT_LIST_OFF);
+	q->nohook = exists("/dev_usb000/openpak_nohook") || exists("/dev_usb001/openpak_nohook") ||
+		    exists(OPENPAK_DIR "/nohook");
+}
+
+/* Copy the plugin this package carries into /dev_hdd0/plugins, read it back, and drop the status
+ * files an older plugin left behind (v0.2.17's "DNS catcher: on" outlived it). Boot list untouched. */
+bool op_install_plugin_file(char *err, int err_len)
+{
+	u64 bl = 0;
+	unsigned char *bb;
+	bool ok;
+
+	ensure_dirs();
+	sysFsMkdir("/dev_hdd0/plugins", 0777);
+	bb = read_all(OPENPAK_USRDIR "/openpak_ca.sprx", 4 * 1024 * 1024, &bl);
+	if (!bb || !bl) { free(bb); snprintf(err, err_len, "The package's plugin file is missing."); return false; }
+	ok = write_atomic(OPENPAK_PLUGIN_DST, bb, bl);
+	free(bb);
+	if (!ok || !plugin_matches_bundle()) { snprintf(err, err_len, "Could not write %s.", OPENPAK_PLUGIN_DST); return false; }
+	sysFsUnlink(OPENPAK_PLUGIN_DST_B);
+	sysFsUnlink(OPENPAK_PLUGIN_DST_C);
+	sysFsUnlink(OPENPAK_PLUGIN_DST_D);
+	sysFsUnlink(OPENPAK_STATUS);
+	sysFsUnlink(OPENPAK_CATCHER_STATUS);
+	sysFsUnlink(OPENPAK_CATCHER_LOG);
+	sysFsUnlink(OPENPAK_PLUGIN_LOG);
+	logf_("plugin file installed (%llu bytes), boot list untouched", (unsigned long long)bl);
+	return true;
+}
+
+/* The explicit "turn it on at boot" step. Refuses unless the file on disk is byte-for-byte the plugin
+ * this package carries (the pass-through build), so a v0.2.17 file can never be put back in the list. */
+bool op_enable_boot_plugin(char *err, int err_len)
+{
+	u64 len = 0;
+	unsigned char *st = read_all(OPENPAK_CATCHER_STATUS, 1024, &len);
+	bool tested = st && len > 6 && strncmp((char *)st, "state=pass-through test", 23) == 0;
+	free(st);
+	if (!tested) {
+		snprintf(err, err_len, "Not enabled: there is no record of a pass-through test with this plugin. "
+			 "Run \"Pass-through test: load the plugin now\" first, use the console for a few minutes, "
+			 "then come back.");
+		return false;
+	}
+	if (!plugin_matches_bundle()) {
+		snprintf(err, err_len, "The plugin file on disk is not the one in this package. Install the plugin "
+			 "file first; the boot list was not changed.");
+		return false;
+	}
+	sysFsUnlink(OPENPAK_PLUGIN_DST_C);
+	sysFsUnlink(OPENPAK_PLUGIN_DST_D);
+	if (!boot_list_remove() || !boot_list_add()) { snprintf(err, err_len, "Could not write %s.", OPENPAK_BOOT_LIST); return false; }
+	logf_("boot plugin enabled");
+	return true;
+}
+
+/* Safe off switch: rename /dev_hdd0/boot_plugins.txt to boot_plugins.off, so Cobra loads no boot
+ * plugin at all on the next start (any other plugin in that list is switched off too). */
+bool op_disable_boot_plugin(char *err, int err_len)
+{
+	if (!exists(OPENPAK_BOOT_LIST)) return true;
+	sysFsUnlink(OPENPAK_BOOT_LIST_OFF);
+	if (sysLv2FsRename(OPENPAK_BOOT_LIST, OPENPAK_BOOT_LIST_OFF) != 0 || exists(OPENPAK_BOOT_LIST)) {
+		snprintf(err, err_len, "Could not rename %s.", OPENPAK_BOOT_LIST);
+		return false;
+	}
+	logf_("boot_plugins.txt renamed to boot_plugins.off");
+	return true;
 }

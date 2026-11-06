@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.18-pt.1 (app start-up without probes, safe mode, explicit boot-list step)
+
+- v0.2.18-pt's app froze the console at launch (blank screen) while the v0.2.17 plugin was still loaded
+  in vsh. The app does no networking; its start-up PS3MAPI reads were the same as v0.2.16's (plus one
+  4-byte read). Most likely cause: launching a title makes vsh run its own lookups (game update check),
+  which hit the v0.2.17 hook and hung vsh; the app's first dialog is drawn by vsh, so it never appeared.
+- The app now draws first and reads only plain files until the user picks an action: no lv2 peek, no
+  syscall 8 / PS3MAPI, no vsh memory, no network. "Show full status" (the old screen) is an explicit
+  choice.
+- Safe mode: L1 held at launch, or openpak_nohook on a USB stick / /dev_hdd0/openpak/nohook. Offers only
+  "Remove the OpenPak boot plugin" (rename boot_plugins.txt to boot_plugins.off) and "Install the plugin
+  file".
+- Installing never turns the boot list on (and removes old OpenPak lines). Steps, each explicit: install
+  the plugin file -> pass-through test (load for this session only, not in the boot list) -> enable the
+  boot plugin. Enabling refuses unless the file on disk is byte-for-byte this package's plugin and the
+  plugin has recorded "state=pass-through test" in catcher.status. Loading refuses any other file.
+
 ## v0.2.18-pt (pass-through hardware test)
 
 - v0.2.17 froze the XMB on hardware (wave background, no icons) right after its first caught lookup

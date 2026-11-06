@@ -14,6 +14,7 @@
 #include <sysutil/video.h>
 #include <rsx/rsx.h>
 #include <lv2/process.h>
+#include <io/pad.h>
 
 #include "patcher.h"
 
@@ -234,6 +235,124 @@ static void quit_clean(void)
 	sysProcessExit(0);
 }
 
+
+/* L1 held at launch = safe mode. Polled for about half a second (the first reads can be empty). */
+static bool l1_held(void)
+{
+	padInfo info;
+	padData d;
+	int i, j;
+	bool held = false;
+	if (ioPadInit(7) != 0) return false;
+	for (i = 0; i < 15 && !held; i++) {
+		if (ioPadGetInfo(&info) == 0)
+			for (j = 0; j < MAX_PADS && j < 7; j++)
+				if (info.status[j] && ioPadGetData(j, &d) == 0 && d.len > 0 && d.BTN_L1) held = true;
+		usleep(33000);
+	}
+	ioPadEnd();
+	return held;
+}
+
+static const char *plugin_desc(const op_quick *q)
+{
+	if (!q->plugin_file) return "not installed";
+	return q->plugin_matches ? "pass-through test build (this package)" : "another version (NOT this package)";
+}
+
+static const char *list_desc(const op_quick *q)
+{
+	if (q->listed) return "ON (boot_plugins.txt names OpenPak)";
+	if (q->boot_list) return "off (boot_plugins.txt has no OpenPak line)";
+	return q->boot_list_off ? "off (renamed to boot_plugins.off)" : "off (no boot_plugins.txt)";
+}
+
+/* Safe mode: nothing is read from the console; only the two file actions are offered. */
+static void safe_mode(bool by_l1)
+{
+	op_quick q;
+	char t[480], err[200];
+	op_quick_read(&q);
+	snprintf(t, sizeof(t), "OpenPak PS3 Patcher %s - SAFE MODE (%s).\n\nNothing is read from the console in "
+		 "safe mode.\nPlugin file: %s\nBoot plugin: %s", OPENPAK_VERSION,
+		 by_l1 ? "L1 held" : "openpak_nohook present", plugin_desc(&q), list_desc(&q));
+	ask(false, t);
+	if (q.boot_list && !want_exit &&
+	    ask(true, "Remove the OpenPak boot plugin?\n\nRenames /dev_hdd0/boot_plugins.txt to boot_plugins.off, so "
+		      "no boot plugin loads on the next start.")) {
+		if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);
+	}
+	if (!want_exit && ask(true, "Install this package's pass-through plugin file into /dev_hdd0/plugins?\n\n"
+				    "The boot list is not changed.")) {
+		if (!op_install_plugin_file(err, sizeof(err))) ask(false, err);
+	}
+	op_quick_read(&q);
+	snprintf(t, sizeof(t), "Done.\n\nPlugin file: %s\nBoot plugin: %s\n\nRestart the console when you are ready.",
+		 plugin_desc(&q), list_desc(&q));
+	ask(false, t);
+}
+
+/* The normal first screen: file state only, then each step is a separate, explicit choice. Returns
+ * true when the user asked for the full status (which reads vsh memory through Cobra). */
+static bool steps(void)
+{
+	op_quick q;
+	char t[480], err[200];
+
+	op_quick_read(&q);
+	if (!q.bundle_ok) { ask(false, "This package's plugin file is missing. Reinstall the package."); return false; }
+
+	if (!q.plugin_matches && !want_exit) {
+		snprintf(t, sizeof(t), "OpenPak PS3 Patcher %s\n\nPlugin file: %s\nBoot plugin: %s\n\nInstall the "
+			 "pass-through plugin file now? The boot list is not changed.", OPENPAK_VERSION, plugin_desc(&q),
+			 list_desc(&q));
+		if (ask(true, t)) {
+			if (!op_install_plugin_file(err, sizeof(err))) { ask(false, err); return false; }
+			op_quick_read(&q);
+		}
+	}
+	if (q.listed && !q.plugin_matches && !want_exit) {
+		if (ask(true, "The boot list names an OpenPak plugin that is not this package's file. Remove the "
+			      "OpenPak boot plugin (rename boot_plugins.txt to boot_plugins.off)?")) {
+			if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);
+			op_quick_read(&q);
+		}
+	}
+	if (q.plugin_matches && !q.listed && !want_exit) {
+		if (ask(true, "Pass-through test: load the plugin now, for this session only?\n\nIt is not added to "
+			      "the boot list. About 45 s later it installs a hook that only counts lookups and changes "
+			      "nothing. If the console freezes, hold the power button until it turns off and turn it on "
+			      "again: nothing loads at boot.")) {
+			int ret = 0, slot = -1;
+			char msg[480];
+			bool ok = op_load_plugin(&ret, &slot);
+			snprintf(msg, sizeof(msg), "%s (slot %d, return 0x%08x).\n\nUse the XMB normally for a few minutes "
+				 "(open a website or the store), then open this app again and choose \"Show full status\". "
+				 "It should say: DNS catcher: pass-through test (installed, nothing redirected).",
+				 ok ? "Plugin loaded for this session" : "The plugin did not load", slot, (unsigned)ret);
+			ask(false, msg);
+			return false;
+		}
+		if (!want_exit && ask(true, "Enable the boot plugin?\n\nOnly do this after the pass-through test showed "
+					   "\"pass-through test (installed ...)\" and the console kept working. The plugin "
+					   "then loads at every start.")) {
+			if (!op_enable_boot_plugin(err, sizeof(err))) ask(false, err);
+			else ask(false, "Boot plugin enabled. Restart the console to load it. Safety switch: an empty "
+					"file named openpak_nohook in the root of a USB stick keeps the hook off.");
+			return false;
+		}
+	}
+	if (q.listed && q.plugin_matches && !want_exit) {
+		if (ask(true, "The OpenPak boot plugin is ON. Remove it (rename boot_plugins.txt to boot_plugins.off)?")) {
+			if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);
+			else ask(false, "Boot plugin removed. Restart the console.");
+			return false;
+		}
+	}
+	return !want_exit && ask(true, "Show full status?\n\nThis reads the console's memory through Cobra (PS3MAPI) "
+				       "and offers Switch to OpenPak / back to PSN.");
+}
+
 int main(int argc, char **argv)
 {
 	op_status s;
@@ -243,6 +362,16 @@ int main(int argc, char **argv)
 	(void)argc; (void)argv;
 	sysUtilRegisterCallback(SYSUTIL_EVENT_SLOT0, sysutil_cb, NULL);
 	if (!video_init()) sysProcessExit(1);
+
+	/* v0.2.18: draw first, then only plain file reads until the user picks an action. Safe mode
+	 * (L1 held at launch, or openpak_nohook present) never touches Cobra, lv2 peek or vsh memory. */
+	{
+		bool l1 = l1_held();
+		op_quick q;
+		op_quick_read(&q);
+		if (l1 || q.nohook) { safe_mode(l1); goto out; }
+	}
+	if (!steps()) goto out;
 
 	op_status_read(&s);
 	build_status(&s, text, sizeof(text));
