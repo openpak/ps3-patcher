@@ -77,11 +77,14 @@ typedef struct {
 	bool boot_list;       /* /dev_hdd0/boot_plugins.txt exists */
 	bool listed;          /* ...and names an OpenPak plugin */
 	bool boot_list_off;   /* /dev_hdd0/boot_plugins.off exists */
+	bool psn_lck;         /* Evilnat PSN protection ON: npsignin_plugin.lck present */
+	bool psn_bak;         /* npsignin_plugin.lck.bak present (protection turned off) */
 	bool nohook;          /* openpak_nohook on a USB stick, or /dev_hdd0/openpak/nohook */
 } op_quick;
 
-bool op_set_syscall_mode(int mode, char *err, int err_len);
 void op_quick_read(op_quick *q);
+void op_remove_syscallmode_cfg(void);
+bool op_psn_protection_off(char *err, int err_len);
 bool op_install_plugin_file(char *err, int err_len);
 bool op_enable_boot_plugin(char *err, int err_len);
 bool op_disable_boot_plugin(char *err, int err_len);

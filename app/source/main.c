@@ -161,6 +161,9 @@ static void build_status(const op_status *s, char *out, size_t n)
 {
 	bool on = op_is_openpak(s);
 	char plug[64], catch[200], live[160], cobp[64];
+	op_quick pq;
+
+	op_quick_read(&pq);
 
 	if (!s->plugin_listed) snprintf(plug, sizeof(plug), "not installed");
 	else if (!s->plugin_ran && !s->plugin_c_ran && !s->plugin_d_ran) snprintf(plug, sizeof(plug), "installed, not loaded at boot");
@@ -203,6 +206,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 "vsh now: %s\n"
 		 "DNS catcher: %s\n"
 		 "PS3MAPI: %s\n"
+		 "PSN protection: %s\n"
 		 "OpenPak CA: %s",
 		 OPENPAK_VERSION,
 		 on ? "OpenPak" : "PSN",
@@ -214,6 +218,7 @@ static void build_status(const op_status *s, char *out, size_t n)
 		 live,
 		 catch,
 		 s->ps3mapi_note[0] ? s->ps3mapi_note : "-",
+		 pq.psn_lck ? "ON (blocks sign-in with CFW syscalls)" : pq.psn_bak ? "off" : "no lock file",
 		 s->ca_openpak ? "installed" : "not installed");
 }
 
@@ -300,6 +305,7 @@ static bool steps(void)
 	char t[480], err[200];
 
 	op_quick_read(&q);
+	op_remove_syscallmode_cfg();
 	if (!q.bundle_ok) { ask(false, "This package's plugin file is missing. Reinstall the package."); return false; }
 
 	if (!q.plugin_matches && !want_exit) {
@@ -318,6 +324,14 @@ static bool steps(void)
 			op_quick_read(&q);
 		}
 	}
+	if (q.psn_lck && !want_exit) {
+		if (ask(true, "Evilnat PSN protection blocks sign-in while CFW syscalls are on. OpenPak needs it off. "
+			      "Turn it off?")) {
+			if (!op_psn_protection_off(err, sizeof(err))) ask(false, err);
+			else ask(false, "PSN protection is off. No restart is needed for this.");
+			op_quick_read(&q);
+		}
+	}
 	if (q.plugin_matches && !want_exit) {
 		if (!q.listed) {
 			if (ask(true, "OpenPak is ready. Enable it at the next boot?\n\nThe plugin loads at every boot "
@@ -332,25 +346,6 @@ static bool steps(void)
 				return false;
 			}
 		} else {
-			if (ask(true, "The XMB shows \"PlayStation Network: Disabled\"?\n\nThis sets OpenPak to hide "
-				      "the CFW peek/poke syscalls from Evilnat's check after boot, while keeping syscall 8. "
-				      "Try it for the next boot (mode 3, reversible)?")) {
-				if (!op_set_syscall_mode(3, err, sizeof(err))) ask(false, err);
-				else ask(false, "Set. Restart, wait about a minute, then check the PSN column. If it is still "
-						"Disabled, come back and try mode 2. To undo, choose \"Stop hiding syscalls\".");
-				if (ask(true, "Restart now?")) { op_reboot(); sleep(10); }
-				return false;
-			}
-			if (ask(true, "Try mode 2 (keep only PS3MAPI/syscall 8) for the next boot?")) {
-				if (!op_set_syscall_mode(2, err, sizeof(err))) ask(false, err);
-				else { ask(false, "Set to mode 2. Restart and check the PSN column."); if (ask(true, "Restart now?")) { op_reboot(); sleep(10); } }
-				return false;
-			}
-			if (ask(true, "Stop hiding syscalls (clear the setting)?")) {
-				if (!op_set_syscall_mode(0, err, sizeof(err))) ask(false, err);
-				else ask(false, "Cleared. Restart to restore normal syscalls.");
-				return false;
-			}
 			if (ask(true, "OpenPak is enabled at boot. Turn it off (rename boot_plugins.txt to "
 				      "boot_plugins.off)?")) {
 				if (!op_disable_boot_plugin(err, sizeof(err))) ask(false, err);

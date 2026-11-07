@@ -1,19 +1,16 @@
 # Changelog
 
-## v0.2.19-sc (Evilnat PSN-guard workaround test; keeps syscall 8)
+## v0.2.19
 
-- Card #155: the XMB shows "PlayStation Network: Disabled -- Disable syscalls to log in" while CFW
-  syscalls are present; the owner had to Disable syscalls every reboot, which also removes syscall 8 that
-  game-process hooking (#156) will need.
-- The guard check itself cannot be patched yet: the only firmware dump on hand is stock Sony 4.93 (no
-  guard); the Evilnat-modified firmware that holds the check is not available to RE. So this is a
-  workaround, not a patch of the check.
-- After the hook installs, the plugin can call PS3MAPI PDISABLE_SYSCALL8 (sc8 0x7777/0x0093, mode 1-3),
-  which removes the CFW peek/poke syscalls (what a CFW check usually tests) while KEEPING syscall 8. Mode
-  3 is "fake disabled" (reversible), 2 keeps only PS3MAPI, 1 keeps cobra+ps3mapi. The mode is one digit in
-  /dev_hdd0/openpak/syscallmode.cfg, applied only after the hook is in; 0/absent leaves syscalls alone.
-  catcher.status gains scmode=; plugin.log records PCHECK before/after.
-- The app offers mode 3 first, then 2, then clear, each with a reboot. Kill switch still skips everything.
+- Card #155: the app turns off Evilnat's "Toggle PSN Protection" so PSN sign-in works with CFW syscalls on
+  (no more Disable syscalls every boot). Protection is ON while /dev_flash/vsh/resource/npsignin_plugin.lck
+  exists (Cobra maps the sign-in plugin's rco to it). The app asks once in plain words (default yes), mounts
+  dev_flash writable (lv2 syscall 837, as webMAN does), renames the file to npsignin_plugin.lck.bak exactly
+  like Evilnat's xai_plugin (never deletes), and always unmounts. No restart needed. The result goes in the
+  app log and the status screen shows PSN protection: ON / off / no lock file.
+- App only; the VSH plugin does no flash writes.
+- The v0.2.19-sc PDISABLE_SYSCALL8 / syscallmode.cfg code is removed from the app and plugin (behaviour is
+  v0.2.18 again); the app deletes a leftover /dev_hdd0/openpak/syscallmode.cfg.
 
 ## v0.2.18
 

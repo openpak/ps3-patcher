@@ -297,7 +297,6 @@ static catcher_list g_list;
 static volatile int g_run __attribute__((section(".data.rel.ro"))) = 1;
 static volatile u32 g_caught __attribute__((section(".data.rel.ro"))) = 0;
 static volatile u32 g_passed __attribute__((section(".data.rel.ro"))) = 0;
-static int g_scmode __attribute__((section(".data.rel.ro"))) = 0;   /* Evilnat PSN-guard workaround (#155) */
 static u32 g_orig_opd __attribute__((section(".data.rel.ro"))) = 0;   /* 0 until installed */
 static char g_state[48] __attribute__((section(".data.rel.ro"))) = "not run yet";
 
@@ -454,7 +453,6 @@ static void write_catcher_status(void)
 	n = put_str(buf, n, " families="); n = put_num(buf, n, g_list.n);
 	n = put_str(buf, n, " caught="); n = put_num(buf, n, g_caught);
 	n = put_str(buf, n, " passed="); n = put_num(buf, n, g_passed);
-	n = put_str(buf, n, " scmode="); n = put_num(buf, n, (unsigned)g_scmode);
 	n = put_str(buf, n, " ip="); n = put_num(buf, n, g_list.ip[0]); buf[n++] = '.';
 	n = put_num(buf, n, g_list.ip[1]); buf[n++] = '.'; n = put_num(buf, n, g_list.ip[2]); buf[n++] = '.';
 	n = put_num(buf, n, g_list.ip[3]);
@@ -492,32 +490,6 @@ static void flush_caught(u32 *seen)
 	}
 }
 
-/* Evilnat PSN guard (card #155): PSN shows "Disabled" while the CFW peek/poke syscalls are present.
- * PS3MAPI PDISABLE_SYSCALL8 (sc8 0x7777 / 0x0093, mode 1-3) removes those while KEEPING syscall 8, which
- * the hook install and game-process hooking (#156) need. Mode 3 is "fake disabled" (reversible); 2 keeps
- * only PS3MAPI; 1 keeps cobra+ps3mapi. Read as one digit from /dev_hdd0/openpak/syscallmode.cfg, applied
- * only AFTER the hook is in (so sc8 was available for the install). 0 or absent = leave syscalls alone.
- * This is a workaround that automates the owner's manual step; it does NOT patch the firmware guard (that
- * needs the Evilnat firmware, which we do not have). Logged, never fatal. */
-static void apply_syscall_mode(void)
-{
-	int fd = -1;
-	unsigned long long got = 0;
-	char c = 0;
-	long before, after;
-	if (sc4(801, (long)"/dev_hdd0/openpak/syscallmode.cfg", 0, (long)&fd, 0) != 0) return;
-	sc4(802, fd, (long)&c, 1, (long)&got);
-	sc4(804, fd, 0, 0, 0);
-	if (got != 1 || c < '1' || c > '3') return;
-	g_scmode = c - '0';
-	before = sc4(8, 0x7777, 0x0094, 0, 0);                 /* PCHECK_SYSCALL8 */
-	tr("syscall mode, pcheck before", (unsigned long long)before);
-	sc4(8, 0x7777, 0x0093, (long)g_scmode, 0);             /* PDISABLE_SYSCALL8 mode */
-	after = sc4(8, 0x7777, 0x0094, 0, 0);
-	tr("syscall mode applied", (unsigned long long)g_scmode);
-	tr("syscall pcheck after", (unsigned long long)after);
-}
-
 /* The status writer. Raw lv2 thread: own stack, raw syscalls, read-only tables only. */
 void catcher_thread(u64 arg)
 {
@@ -538,7 +510,6 @@ void catcher_thread(u64 arg)
 			set_state("off - kill switch openpak_nohook");
 		} else if (install_catcher()) {
 			tr("catcher installed, cell", mem_u32(RS_CELL_ADDR));
-			apply_syscall_mode();
 		} else {
 			tr("catcher left out", 0);
 		}
